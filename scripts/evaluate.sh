@@ -22,6 +22,7 @@ CKPT="${1:?usage: $0 <checkpoint.pt> <bc|act> <n_rollouts>}"
 POLICY_TYPE="${2:?usage: $0 <checkpoint.pt> <bc|act> <n_rollouts>}"
 N_ROLLOUTS="${3:-20}"
 TIMEOUT_PER_ROLLOUT="${TIMEOUT_PER_ROLLOUT:-18}"
+EVAL_DEVICE="${EVAL_DEVICE:-cpu}"   # set to cuda:0 on the workstation
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -49,7 +50,7 @@ echo "=== Starting inference_node ==="
     -p policy_type:="$POLICY_TYPE" \
     -p inference_rate_hz:=30.0 \
     -p execution_mode:=first_action \
-    -p device:=cpu \
+    -p device:="$EVAL_DEVICE" \
     > /tmp/eval_inf.log 2>&1 &
 INF_PID=$!
 sleep 3

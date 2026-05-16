@@ -2,7 +2,7 @@
 
 A ROS 2-native imitation learning pipeline for manipulation, designed as a modular extension to the MyBotShop robotic webserver platform.
 
-**Status:** Technical concept + architecture + skeleton implementation. Working prototype in progress on lab PC.
+**Status:** Working end-to-end. Full pipeline validated on a real ROS 2 stack with a simulated Franka Panda solving pick-and-place. ACT trained on CPU as proof-of-concept; full ACT training is the workstation step (see [WORKSTATION_RUNBOOK.md](WORKSTATION_RUNBOOK.md)).
 
 ---
 
@@ -17,7 +17,19 @@ A complete pipeline for:
 
 Optional extension: PPO-based RL fine-tuning of the IL policy.
 
-The pipeline integrates with the MyBotShop platform through ROS 2 service and topic contracts only — no platform-internal code is modified.
+The pipeline integrates with the MyBotShop platform through ROS 2 service and topic contracts only — no platform-internal code is modified. A `pybullet_robot_node` stand-in is included so the pipeline can be developed and validated without the actual platform installed.
+
+## Verified End-to-End (this dev box, CPU)
+
+| Step | Result |
+|---|---|
+| 40 pick-and-place demonstrations via HTTP → ROS → parquet | 40 / 40 success |
+| BC training (200 epochs, 22K frames) | 4 min, val loss 0.0099 |
+| BC closed-loop rollouts | 1 / 10 (baseline for the multi-phase task) |
+| ACT training (LeRobot 0.5.x, 5.8M params, CPU) | trains end-to-end |
+| ACT checkpoint loads through inference_node | ✓ |
+| FastAPI REST + WebSocket layer dispatches typed ROS services | ✓ |
+| 23 unit tests | passing |
 
 ---
 
@@ -181,20 +193,20 @@ Results, including negative findings, are documented in `docs/05_evaluation_resu
 
 ---
 
-## What Is Not Yet Done
+## Status Checklist
 
-This repository currently contains:
-
-- ✅ Full technical concept, architecture diagrams, API spec, dataset schema
-- ✅ ROS 2 node skeletons (data logger, inference) with the correct ROS interfaces wired up
-- ✅ Dataset writer and frame validator
-- ✅ Training pipeline scaffold + BC reference policy
-- ✅ FastAPI web layer
-- 🟡 Working prototype on physical lab PC with their platform installed (in progress)
-- 🟡 ACT training run with real demonstrations (next)
-- 🟡 Live inference deployment (next)
-- 🟡 Evaluation results document (next)
-- 🟡 Demo video (final step)
+- ✅ Technical concept, architecture diagrams, API spec, dataset schema
+- ✅ ROS 2 nodes (data_logger, inference, pybullet_robot) wired and verified live
+- ✅ Custom interfaces (`il_pipeline_msgs`) built and registered with ROS 2
+- ✅ Dataset writer, frame validator, LeRobot parquet round-trip
+- ✅ Training pipeline (BC and ACT both)
+- ✅ FastAPI web layer with live ROS bridge
+- ✅ 40-episode pick-and-place dataset collected (100 % expert success)
+- ✅ BC trained and evaluated end-to-end
+- ✅ ACT (LeRobot 0.5.x) trains and loads through inference node
+- 🟡 Full ACT training (workstation GPU, see WORKSTATION_RUNBOOK.md)
+- 🟡 Final evaluation rollouts on workstation-trained ACT
+- 🟡 Demo video
 
 ---
 

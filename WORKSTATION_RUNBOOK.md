@@ -136,13 +136,18 @@ as stretch goal.)
 ## 6. Evaluate via closed-loop rollouts
 
 ```bash
-bash scripts/evaluate.sh runs/panda_bc/best.pt   bc   20    # BC, 20 rollouts
-bash scripts/evaluate.sh runs/panda_act/best.pt  act  20    # ACT, 20 rollouts
+# CPU inference is fine even on the workstation — saves GPU for training
+EVAL_DEVICE=cuda:0 bash scripts/evaluate.sh runs/panda_bc/best.pt   bc   20
+EVAL_DEVICE=cuda:0 bash scripts/evaluate.sh runs/panda_act/best.pt  act  20
 ```
 
 The script resets the sim between rollouts, deploys the policy via
 `/inference_node/load_policy`, watches `/task_status`, and reports
 success rate.
+
+Expected results (with full GPU training):
+- BC baseline: 10–30 % (limited by single-step MLP on multi-phase task)
+- ACT primary: 70–90 % (action chunking captures the phase structure)
 
 ---
 
@@ -187,12 +192,36 @@ The deliverable for the CEO:
 
 ## What is *not* on the workstation critical path
 
-The following were already verified on the dev box and need no rerun:
+The following were already verified end-to-end on the dev box and need no rerun:
 
-- ROS 2 service contracts (`StartEpisode`, `StopEpisode`, `LoadPolicy`)
-- HTTP → ROS bridge for the FastAPI layer
-- LeRobotDataset parquet round-trip (read/write/normalise)
+- ROS 2 service contracts (`StartEpisode`, `StopEpisode`, `LoadPolicy`) on Jazzy
+- HTTP → ROS bridge dispatching typed service calls through FastAPI
+- LeRobotDataset parquet round-trip (read / write / normalise stats)
 - Frame validator and dataset writer unit tests (23 passing)
-- BC training loop convergence
+- BC training loop convergence on real pick-and-place data
+- BC closed-loop rollouts: pipeline successful, 1/10 success on CPU baseline
+- ACT (LeRobot 0.5.x) training end-to-end on CPU — 5.8M params, gradients flow,
+  checkpoint loads through the inference node's policy loader
+- 40-episode pick-and-place dataset collected with 100 % expert success rate
+- Constraint-based grasping in the PyBullet stand-in robot
 
 Only re-run those if a workstation-specific dependency breaks them.
+
+---
+
+## Estimated workstation time budget
+
+| Step | Time |
+|---|---|
+| Clone + install deps | 20 min |
+| Build msgs + verify nodes | 10 min |
+| Collect 40 demos | 15 min |
+| BC training | 2 min |
+| ACT training (2000 epochs, GPU) | 30–60 min |
+| Diffusion Policy training (stretch) | 60–120 min |
+| Evaluation rollouts (20 each, BC + ACT) | 20 min |
+| Demo video recording | 30 min |
+| Polish + push | 30 min |
+| **Total** | **~4 hours** |
+
+Comfortable inside one workday.
