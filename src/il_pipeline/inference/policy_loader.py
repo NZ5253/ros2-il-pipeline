@@ -1,8 +1,13 @@
 """
 Policy loader for the inference node.
 
-Loads a trained checkpoint and returns (policy, normaliser). The inference
-node treats these as opaque objects with `predict_action_chunk(obs)`.
+Loads a trained checkpoint and returns an object with a uniform
+`predict_action_chunk(obs_tensor)` method, regardless of whether the
+underlying model is a BC MLP or a LeRobot ACT policy. Also returns a
+Normaliser for input/output normalisation.
+
+The inference node treats these as opaque — no policy-specific code lives
+in the ROS layer.
 """
 
 from __future__ import annotations
@@ -15,7 +20,6 @@ import torch
 import torch.nn as nn
 
 from il_pipeline.inference.normaliser import Normaliser
-from il_pipeline.training.policy_factory import build_policy
 
 
 def load_policy(
@@ -23,35 +27,143 @@ def load_policy(
     policy_type: str,
     device: torch.device,
 ) -> Tuple[nn.Module, Normaliser]:
-    ckpt = torch.load(checkpoint_path, map_location=device)
+    """
+    Dispatches by policy_type.
 
+    BC checkpoints are simple state_dict + config dicts; we rebuild a
+    BCPolicy and load it.
+
+    ACT checkpoints are state_dicts of a LeRobot ACTPolicy. We rebuild
+    the policy with the same config and load weights. The returned object
+    is wrapped with predict_action_chunk so the inference node sees a
+    uniform interface.
+    """
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     cfg = ckpt.get("config", {})
+
+    if policy_type == "bc":
+        return _load_bc(ckpt, cfg, device)
+    if policy_type == "act":
+        return _load_act(ckpt, cfg, device)
+    raise ValueError(f"unknown policy_type: {policy_type}")
+
+
+# ── BC ───────────────────────────────────────────────────────────────────
+
+
+def _load_bc(ckpt: dict, cfg: dict, device: torch.device):
+    from il_pipeline.training.train import BCPolicy
+
     state_dim = cfg.get("state_dim") or _state_dim_from_ckpt(ckpt)
     action_dim = cfg.get("action_dim") or _action_dim_from_ckpt(ckpt)
-    chunk_size = cfg.get("chunk_size", 1)
-
-    policy = build_policy(
-        policy_type=policy_type,
-        state_dim=state_dim,
-        action_dim=action_dim,
-        chunk_size=chunk_size,
-    ).to(device)
+    hidden = cfg.get("hidden", 256)
+    policy = BCPolicy(state_dim=state_dim, action_dim=action_dim, hidden=hidden).to(device)
     policy.load_state_dict(ckpt["state_dict"])
     policy.eval()
 
-    # Normaliser uses stats saved alongside the dataset
     stats_path = Path(cfg.get("dataset_path", "")) / "meta" / "stats.json"
     if stats_path.exists():
-        stats = json.loads(stats_path.read_text())
-        normaliser = Normaliser(stats=stats, device=device)
+        normaliser = Normaliser(stats=json.loads(stats_path.read_text()), device=device)
     else:
         normaliser = Normaliser.identity(device=device)
 
     return policy, normaliser
 
 
+# ── ACT ──────────────────────────────────────────────────────────────────
+
+
+def _load_act(ckpt: dict, cfg: dict, device: torch.device):
+    """
+    Rebuild a LeRobot ACTPolicy with the same config used at training time,
+    load weights, and wrap with predict_action_chunk that the inference node
+    expects.
+    """
+    from lerobot.policies.act.configuration_act import ACTConfig
+    from lerobot.policies.act.modeling_act import ACTPolicy
+    from lerobot.configs.types import PolicyFeature, FeatureType, NormalizationMode
+
+    state_dim = cfg["state_dim"]
+    action_dim = cfg["action_dim"]
+    chunk_size = cfg["chunk_size"]
+    n_joints = 7
+    proprio_dim = 2 * n_joints
+    env_dim = state_dim - proprio_dim
+
+    input_features = {
+        "observation.state": PolicyFeature(type=FeatureType.STATE, shape=(proprio_dim,)),
+        "observation.environment_state": PolicyFeature(type=FeatureType.ENV, shape=(env_dim,)),
+    }
+    output_features = {
+        "action": PolicyFeature(type=FeatureType.ACTION, shape=(action_dim,)),
+    }
+    config = ACTConfig(
+        n_obs_steps=1,
+        chunk_size=chunk_size,
+        n_action_steps=chunk_size,
+        input_features=input_features,
+        output_features=output_features,
+        normalization_mapping={
+            "STATE": NormalizationMode.MEAN_STD,
+            "ENV": NormalizationMode.MEAN_STD,
+            "ACTION": NormalizationMode.MEAN_STD,
+        },
+        dim_model=256,
+        n_encoder_layers=2,
+        n_decoder_layers=1,
+        dim_feedforward=1024,
+        kl_weight=10.0,
+        dropout=0.1,
+        use_vae=True,
+        push_to_hub=False,
+    )
+    inner = ACTPolicy(config).to(device)
+    inner.load_state_dict(ckpt["state_dict"])
+    inner.eval()
+
+    return _ActAdapter(inner, proprio_dim).to(device), Normaliser.identity(device=device)
+
+
+class _ActAdapter(nn.Module):
+    """
+    Wraps a LeRobot ACTPolicy so the inference node sees the same
+    `predict_action_chunk(obs_tensor)` API as the BC policy.
+
+    Splits the 21-D `observation.state` tensor into the STATE+ENV streams
+    ACT expects, calls ACTPolicy.select_action (which internally maintains
+    a chunk queue), and returns the next action as a single-step chunk.
+    """
+
+    def __init__(self, inner, proprio_dim: int) -> None:
+        super().__init__()
+        self.inner = inner
+        self.proprio_dim = proprio_dim
+
+    @torch.inference_mode()
+    def predict_action_chunk(self, observation: torch.Tensor) -> torch.Tensor:
+        # observation comes in as a 1-D 21-vector from the inference node.
+        # ACT expects a batched dict with STATE + ENV.
+        if observation.ndim == 1:
+            observation = observation.unsqueeze(0)
+        state = observation[..., : self.proprio_dim]
+        env = observation[..., self.proprio_dim :]
+        batch = {
+            "observation.state": state,
+            "observation.environment_state": env,
+        }
+        # select_action pops one action from the chunk queue; on empty queue
+        # it runs the model and refills.
+        action = self.inner.select_action(batch)
+        # The inference node expects shape [chunk_size, action_dim]. Return
+        # a single-step chunk; the node will pick action[0] in first_action
+        # execution mode.
+        return action.unsqueeze(0)
+
+
+# ── Helpers for old BC checkpoints without explicit dims ────────────────
+
+
 def _state_dim_from_ckpt(ckpt: dict) -> int:
-    # Best-effort: infer state_dim from the first Linear layer in the state dict
     for k, v in ckpt["state_dict"].items():
         if "weight" in k and v.ndim == 2:
             return v.shape[1]
@@ -59,11 +171,10 @@ def _state_dim_from_ckpt(ckpt: dict) -> int:
 
 
 def _action_dim_from_ckpt(ckpt: dict) -> int:
-    # Best-effort: infer action_dim from the last Linear weight
-    last_linear = None
+    last = None
     for k, v in ckpt["state_dict"].items():
         if "weight" in k and v.ndim == 2:
-            last_linear = v
-    if last_linear is None:
+            last = v
+    if last is None:
         raise ValueError("could not infer action_dim from checkpoint")
-    return last_linear.shape[0]
+    return last.shape[0]
