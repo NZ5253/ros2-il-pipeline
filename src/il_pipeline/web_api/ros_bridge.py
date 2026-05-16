@@ -28,6 +28,7 @@ class ServiceResult:
 
     success: bool
     message: str
+    raw: object = None   # the full response object; consumers can read typed fields
 
 
 class RosBridge:
@@ -88,35 +89,50 @@ class RosBridge:
     async def call_service_async(
         self,
         service_name: str,
+        srv_type=None,
+        request=None,
         timeout_s: float = 5.0,
     ) -> ServiceResult:
         """
-        Issue a Trigger service call asynchronously.
+        Issue a service call asynchronously.
 
-        Handlers in the FastAPI app await this; the actual rclpy call runs
-        in the executor thread.
+        If `srv_type` and `request` are not provided, defaults to std_srvs/Trigger
+        (common case for ad-hoc lifecycle endpoints). The handler in the FastAPI
+        app awaits this; the actual rclpy call runs in the executor thread.
         """
         if self._dry_run:
-            return ServiceResult(success=True, message=f"dry-run: {service_name}")
+            return ServiceResult(
+                success=True,
+                message=f"dry-run: {service_name}",
+                raw=None,
+            )
 
-        from std_srvs.srv import Trigger
+        if srv_type is None:
+            from std_srvs.srv import Trigger
+            srv_type = Trigger
+            request = Trigger.Request()
 
-        client = self._service_clients.get(service_name)
+        client_key = f"{service_name}::{srv_type.__module__}.{srv_type.__name__}"
+        client = self._service_clients.get(client_key)
         if client is None:
-            client = self._node.create_client(Trigger, service_name)
-            self._service_clients[service_name] = client
+            client = self._node.create_client(srv_type, service_name)
+            self._service_clients[client_key] = client
 
         if not client.wait_for_service(timeout_sec=timeout_s):
             return ServiceResult(
                 success=False,
                 message=f"service {service_name} unavailable after {timeout_s}s",
+                raw=None,
             )
 
-        future = client.call_async(Trigger.Request())
+        future = client.call_async(request)
         result = await self._await_future(future, timeout_s)
         if result is None:
-            return ServiceResult(success=False, message="service call timed out")
-        return ServiceResult(success=result.success, message=result.message)
+            return ServiceResult(success=False, message="service call timed out", raw=None)
+
+        success = bool(getattr(result, "success", False))
+        message = getattr(result, "message", "") or ""
+        return ServiceResult(success=success, message=message, raw=result)
 
     @staticmethod
     async def _await_future(future, timeout_s: float):

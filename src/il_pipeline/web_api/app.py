@@ -30,6 +30,12 @@ from il_pipeline.web_api.ros_bridge import RosBridge
 # ── Pydantic schemas (small, match docs/03_api_specification.md) ─────────
 
 
+class CreateDatasetRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+    robot_model: str = "generic"
+    task_description: str = ""
+
+
 class StartRecordRequest(BaseModel):
     episode_name: str = Field(..., min_length=1)
     task_description: str = ""
@@ -98,30 +104,84 @@ async def list_datasets():
     return {"datasets": list(registry.datasets.values())}
 
 
+@app.post("/api/v1/datasets", status_code=201)
+async def create_dataset(body: CreateDatasetRequest):
+    dataset_id = f"ds-{uuid.uuid4().hex[:8]}"
+    record = {
+        "id": dataset_id,
+        "name": body.name,
+        "robot_model": body.robot_model,
+        "task_description": body.task_description,
+        "created_at": bridge.now_iso() if bridge else "",
+        "episode_count": 0,
+    }
+    registry.datasets[dataset_id] = record
+    return record
+
+
 @app.post("/api/v1/datasets/{dataset_id}/record/start", status_code=201)
 async def start_recording(dataset_id: str, body: StartRecordRequest):
     if dataset_id not in registry.datasets:
         raise HTTPException(404, f"dataset {dataset_id} not found")
+
+    srv_type, req = _build_start_episode(body, dataset_id)
     result = await bridge.call_service_async(
         "/data_logger_node/start_episode",
+        srv_type=srv_type,
+        request=req,
         timeout_s=2.0,
     )
     if not result.success:
-        raise HTTPException(500, result.message)
-    return {"episode_id": result.message, "started_at": bridge.now_iso()}
+        raise HTTPException(500, result.message or "start_episode failed")
+    episode_id = getattr(result.raw, "episode_id", "") if result.raw else ""
+    return {"episode_id": episode_id, "started_at": bridge.now_iso()}
 
 
 @app.post("/api/v1/datasets/{dataset_id}/record/stop")
 async def stop_recording(dataset_id: str, body: StopRecordRequest):
     if dataset_id not in registry.datasets:
         raise HTTPException(404, f"dataset {dataset_id} not found")
+
+    srv_type, req = _build_stop_episode(body)
     result = await bridge.call_service_async(
         "/data_logger_node/stop_episode",
+        srv_type=srv_type,
+        request=req,
         timeout_s=5.0,
     )
     if not result.success:
-        raise HTTPException(500, result.message)
-    return {"outcome": body.outcome, "summary": result.message}
+        raise HTTPException(500, result.message or "stop_episode failed")
+    raw = result.raw
+    return {
+        "outcome": body.outcome,
+        "episode_id": getattr(raw, "episode_id", "") if raw else "",
+        "frame_count": getattr(raw, "frame_count", 0) if raw else 0,
+        "duration_s": getattr(raw, "duration_s", 0.0) if raw else 0.0,
+        "saved_to": getattr(raw, "saved_to", "") if raw else "",
+    }
+
+
+def _build_start_episode(body: "StartRecordRequest", dataset_id: str):
+    """Construct a StartEpisode service request, or a tuple of (None, None) in dry-run."""
+    try:
+        from il_pipeline_msgs.srv import StartEpisode
+    except ImportError:
+        return None, None
+    req = StartEpisode.Request()
+    req.episode_name = body.episode_name
+    req.task_description = body.task_description
+    req.dataset_id = dataset_id
+    return StartEpisode, req
+
+
+def _build_stop_episode(body: "StopRecordRequest"):
+    try:
+        from il_pipeline_msgs.srv import StopEpisode
+    except ImportError:
+        return None, None
+    req = StopEpisode.Request()
+    req.outcome = body.outcome
+    return StopEpisode, req
 
 
 # ── Training ─────────────────────────────────────────────────────────────

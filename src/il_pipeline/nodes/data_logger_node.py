@@ -24,9 +24,8 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
 from sensor_msgs.msg import JointState, Image
 from geometry_msgs.msg import PoseStamped, Twist
-from std_srvs.srv import Trigger
+from il_pipeline_msgs.srv import StartEpisode, StopEpisode
 
-# Project-local. Defined alongside the node and resolved on the lab PC.
 from il_pipeline.dataset.lerobot_writer import LeRobotShardWriter
 from il_pipeline.dataset.frame_validator import FrameValidator
 
@@ -153,10 +152,10 @@ class DataLoggerNode(Node):
         )
 
         self._srv_start = self.create_service(
-            Trigger, "~/start_episode", self._handle_start
+            StartEpisode, "~/start_episode", self._handle_start
         )
         self._srv_stop = self.create_service(
-            Trigger, "~/stop_episode", self._handle_stop
+            StopEpisode, "~/stop_episode", self._handle_stop
         )
 
         self.get_logger().info(
@@ -244,31 +243,50 @@ class DataLoggerNode(Node):
 
     # ── Service handlers ──────────────────────────────────────────────────
 
-    def _handle_start(self, request, response):
+    def _handle_start(self, request: StartEpisode.Request, response: StartEpisode.Response):
         if self._episode is not None:
             response.success = False
+            response.episode_id = ""
             response.message = "an episode is already in progress; stop it first"
             return response
 
-        episode_id = f"ep-{int(time.time())}"
+        episode_id = request.episode_name or f"ep-{int(time.time())}"
         self._episode = EpisodeBuffer(
             episode_id=episode_id,
-            task_description="",  # populated by future StartEpisode.srv
+            task_description=request.task_description,
             started_at=time.time(),
         )
-        self.get_logger().info(f"started episode {episode_id}")
+        self.get_logger().info(
+            f"started episode {episode_id} (task='{request.task_description}')"
+        )
         response.success = True
-        response.message = episode_id
+        response.episode_id = episode_id
+        response.message = ""
         return response
 
-    def _handle_stop(self, request, response):
+    def _handle_stop(self, request: StopEpisode.Request, response: StopEpisode.Response):
         if self._episode is None:
             response.success = False
+            response.episode_id = ""
+            response.frame_count = 0
+            response.duration_s = 0.0
+            response.saved_to = ""
             response.message = "no active episode"
             return response
 
         ep = self._episode
         self._episode = None
+
+        if request.outcome == "discard":
+            self.get_logger().info(f"discarded episode {ep.episode_id} ({len(ep.frames)} frames)")
+            response.success = True
+            response.episode_id = ep.episode_id
+            response.frame_count = len(ep.frames)
+            response.duration_s = ep.duration_s
+            response.saved_to = ""
+            response.message = "discarded"
+            return response
+
         # Mark the final frame's done flag.
         if ep.frames:
             ep.frames[-1]["next.done"] = True
@@ -280,6 +298,10 @@ class DataLoggerNode(Node):
         )
         self.get_logger().info(msg)
         response.success = True
+        response.episode_id = ep.episode_id
+        response.frame_count = len(ep.frames)
+        response.duration_s = ep.duration_s
+        response.saved_to = str(path)
         response.message = msg
         return response
 

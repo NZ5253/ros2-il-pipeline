@@ -28,6 +28,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import JointState, Image
 from geometry_msgs.msg import PoseStamped, Twist
 from std_srvs.srv import Trigger
+from il_pipeline_msgs.srv import LoadPolicy
 
 # Project-local
 from il_pipeline.inference.policy_loader import load_policy
@@ -108,7 +109,7 @@ class InferenceNode(Node):
 
         # Services
         self._srv_load = self.create_service(
-            Trigger, "~/load_policy", self._handle_load_policy
+            LoadPolicy, "~/load_policy", self._handle_load_policy
         )
         self._srv_start = self.create_service(
             Trigger, "~/start", self._handle_start
@@ -247,15 +248,36 @@ class InferenceNode(Node):
         self._policy, self._normaliser = load_policy(path, policy_type, self._device)
         self.get_logger().info(f"loaded {policy_type} policy from {path}")
 
-    def _handle_load_policy(self, request, response):
-        # Trigger.srv has no payload; in production this is LoadPolicy.srv with
-        # checkpoint_path + policy_type + rate. Stubbed against parameter for now.
+    def _handle_load_policy(
+        self, request: LoadPolicy.Request, response: LoadPolicy.Response
+    ):
+        t0 = time.time()
         try:
-            self._load(self.get_parameter("checkpoint_path").value)
+            # Honour the request payload; fall back to parameter values where blank.
+            ckpt_path = request.checkpoint_path or self.get_parameter("checkpoint_path").value
+            policy_type = request.policy_type or self.get_parameter("policy_type").value
+
+            # Override runtime rate and execution mode if provided.
+            if request.inference_rate_hz > 0:
+                self._inference_rate = request.inference_rate_hz
+                self._timer.cancel()
+                self._timer = self.create_timer(1.0 / self._inference_rate, self._tick)
+            if request.execution_mode:
+                self._execution_mode = request.execution_mode
+
+            # Stash policy_type as a parameter so _load picks it up.
+            self.set_parameters([
+                rclpy.parameter.Parameter("policy_type", value=policy_type),
+                rclpy.parameter.Parameter("checkpoint_path", value=ckpt_path),
+            ])
+            self._load(ckpt_path)
+
             response.success = True
-            response.message = "loaded"
+            response.warm_up_ms = (time.time() - t0) * 1000.0
+            response.message = f"loaded {policy_type} from {ckpt_path}"
         except Exception as e:  # noqa: BLE001
             response.success = False
+            response.warm_up_ms = (time.time() - t0) * 1000.0
             response.message = str(e)
         return response
 

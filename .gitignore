@@ -26,6 +26,7 @@ env/
 .DS_Store
 
 # ROS 2 build artefacts
+ros2_ws
 install/
 log/
 build/
