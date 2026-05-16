@@ -1,0 +1,10 @@
+# Stop the current demonstration episode.
+
+string outcome                # "success" or "discard"
+---
+bool success
+string episode_id
+int32 frame_count
+float64 duration_s
+string saved_to               # filesystem path of the written shard
+string message

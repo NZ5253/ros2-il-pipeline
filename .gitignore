@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.tox/
+.venv/
+venv/
+env/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# ROS 2 build artefacts
+install/
+log/
+build/
+
+# Datasets and checkpoints — keep out of git, share via Hub or external storage
+datasets/
+checkpoints/
+runs/
+wandb/
+*.pt
+*.pth
+*.parquet
+
+# Generated docs / outputs
+docs/_build/
+*.mp4
+*.webm
+
+# Local config secrets
+.env
+*.local.yaml

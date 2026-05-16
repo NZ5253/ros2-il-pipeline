@@ -1,0 +1,17 @@
+# Parameters for the data logger node.
+# Use with:
+#   ros2 run il_pipeline data_logger_node --ros-args --params-file configs/data_logger.yaml
+
+data_logger_node:
+  ros__parameters:
+    dataset_root: "/data/lerobot_datasets"
+    dataset_name: "panda_pickplace_v1"
+    joint_state_topic: "/joint_states"
+    cartesian_pose_topic: "/cartesian_pose"
+    teleop_cmd_topic: "/teleop_cmd"
+    image_topic: "/camera/image_raw"
+    enable_camera: false
+    expected_fps: 30.0
+    expected_n_joints: 7
+    action_dim: 7
+    action_mode: "delta_joint"

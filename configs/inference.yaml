@@ -1,0 +1,14 @@
+# Parameters for the inference node.
+
+inference_node:
+  ros__parameters:
+    checkpoint_path: ""             # set via service call once a policy is trained
+    policy_type: "act"
+    inference_rate_hz: 30.0
+    execution_mode: "temporal_ensemble"
+    joint_state_topic: "/joint_states"
+    cartesian_pose_topic: "/cartesian_pose"
+    cmd_topic: "/cmd_robot"
+    image_topic: "/camera/image_raw"
+    enable_camera: false
+    device: "cuda:0"

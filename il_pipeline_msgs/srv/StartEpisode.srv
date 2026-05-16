@@ -1,0 +1,9 @@
+# Start recording a new demonstration episode.
+
+string episode_name           # human-readable identifier
+string task_description       # natural-language description of the task
+string dataset_id             # which dataset to append to
+---
+bool success
+string episode_id             # uuid of the started episode
+string message                # error description if not successful

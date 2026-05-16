@@ -1,0 +1,24 @@
+# Core deps that the pipeline needs to run end-to-end on the lab PC.
+# ROS 2 packages are installed separately via apt (ros-humble-* or ros-jazzy-*).
+
+numpy>=1.24
+torch>=2.0
+pyarrow>=14
+
+# Web layer
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.0
+websockets>=12
+
+# Dataset / training
+datasets>=2.16
+huggingface-hub>=0.20
+
+# Add on lab PC after install:
+# lerobot         (HuggingFace) — provides ACT, Diffusion Policy, dataset reader
+# stable-baselines3>=2.0 — only needed for optional RL fine-tuning
+
+# Dev tools
+pytest>=7.4
+ruff>=0.1

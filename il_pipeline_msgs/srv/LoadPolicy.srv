@@ -1,0 +1,10 @@
+# Load a trained policy into the inference node.
+
+string checkpoint_path        # path to a .pt checkpoint
+string policy_type            # "bc" | "act" | "diffusion"
+float64 inference_rate_hz
+string execution_mode         # "first_action" | "full_chunk" | "temporal_ensemble"
+---
+bool success
+float64 warm_up_ms
+string message
