@@ -256,6 +256,9 @@ class DataLoggerNode(Node):
             task_description=request.task_description,
             started_at=time.time(),
         )
+        # Reset the validator's monotonic-timestamp baseline so this episode's
+        # timestamps (starting at 0) aren't compared against the prior episode's.
+        self._validator.reset()
         self.get_logger().info(
             f"started episode {episode_id} (task='{request.task_description}')"
         )
@@ -287,10 +290,19 @@ class DataLoggerNode(Node):
             response.message = "discarded"
             return response
 
-        # Mark the final frame's done flag.
-        if ep.frames:
-            ep.frames[-1]["next.done"] = True
+        if not ep.frames:
+            msg = f"episode {ep.episode_id} had zero frames; nothing to save"
+            self.get_logger().warn(msg)
+            response.success = False
+            response.episode_id = ep.episode_id
+            response.frame_count = 0
+            response.duration_s = ep.duration_s
+            response.saved_to = ""
+            response.message = msg
+            return response
 
+        # Mark the final frame's done flag.
+        ep.frames[-1]["next.done"] = True
         path = self._writer.write_episode(ep.episode_id, ep.frames)
         msg = (
             f"saved episode {ep.episode_id} "
@@ -311,9 +323,17 @@ def main(args: Optional[list[str]] = None) -> None:
     node = DataLoggerNode()
     try:
         rclpy.spin(node)
+    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
+        pass
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.destroy_node()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            rclpy.shutdown()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 if __name__ == "__main__":
