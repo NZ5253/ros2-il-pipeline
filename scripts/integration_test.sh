@@ -21,13 +21,13 @@ echo "=== Sourcing ROS 2 Jazzy ==="
 source /opt/ros/jazzy/setup.bash
 source /tmp/mybotshop_ws/install/setup.bash
 
-export PYTHONPATH="$PYTHONPATH:$REPO_ROOT/src"
+export PYTHONPATH="$PYTHONPATH:$REPO_ROOT/il_pipeline"
 
 rm -rf /tmp/integration_test_datasets
 
 echo ""
 echo "=== Starting data_logger_node (background) ==="
-/usr/bin/python3 "$REPO_ROOT/src/il_pipeline/nodes/data_logger_node.py" \
+/usr/bin/python3 "$REPO_ROOT/il_pipeline/il_pipeline/nodes/data_logger_node.py" \
     --ros-args \
     -p dataset_root:=/tmp/integration_test_datasets \
     -p dataset_name:=integration_run \

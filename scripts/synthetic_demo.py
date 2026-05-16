@@ -28,7 +28,7 @@ import numpy as np
 import torch
 
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "il_pipeline"))
 
 from il_pipeline.dataset.lerobot_writer import LeRobotShardWriter   # noqa: E402
 from il_pipeline.training.lerobot_torch_dataset import LeRobotTorchDataset  # noqa: E402

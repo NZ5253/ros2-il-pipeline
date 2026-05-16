@@ -240,6 +240,26 @@ Within the same architectural skeleton, several extensions are straightforward:
 
 ---
 
+## 10b. A Note on Platform Integration
+
+A point worth being explicit about: the MyBotShop robotic webserver platform is **a commercial product shipped pre-installed with the company's integrated robots**. After reading the documentation at the URL in the brief and surveying MyBotShop's public GitHub presence, I confirmed:
+
+- The webserver is not available as an open-source package, Docker image, or pip install
+- The public GitHub organisation contains hardware drivers and example packages (Husky / Aloha v2 / Isaac Sim / Nav2 templates), but no webserver source
+- The platform docs reference paths like `/opt/.../webserver/config/robot_webserver.yaml`, consistent with deployment on the customer's pre-flashed device
+- Default port (9000), WebSocket-based real-time interface, and "plugin-style extensibility via custom command bindings" are documented
+
+Given this, the design choice was to **integrate against the documented contracts** rather than fabricate a half-installed copy of the platform. Concretely:
+
+- The `pybullet_robot_node` stand-in in this repo plays the role the customer robot plays inside the MyBotShop platform: publishes `/joint_states`, `/cartesian_pose`, listens on `/cmd_robot`. **Any robot that respects these ROS 2 topic contracts is a drop-in replacement, including the actual platform on the lab hardware.**
+- The FastAPI service mirrors the platform's WebSocket-based architecture and is intentionally additive — it runs alongside, never replaces. The endpoints in `03_api_specification.md` are the integration surface a real deployment would expose to the existing webserver UI.
+
+This is also why the new ROS 2 nodes (`data_logger_node`, `inference_node`) speak only standard message types (`sensor_msgs/JointState`, `geometry_msgs/PoseStamped`, `geometry_msgs/Twist`) plus three custom services in `il_pipeline_msgs`. They make no assumptions about the platform's internals — only its published interfaces. Swapping the stand-in for the real robot controller does not require any code change in the pipeline; only the topic remapping.
+
+The CEO's note that "the documentation is somewhat outdated, and the platform already contains significantly more functionality than described there" applies here: there are likely platform-side hooks (e.g., specific WebSocket message types for live telemetry, custom action bindings) that the public docs don't describe. Those gaps are best closed on the lab hardware where the actual platform runs.
+
+---
+
 ## 11. Risks and Open Questions
 
 | Item | Status | Mitigation |

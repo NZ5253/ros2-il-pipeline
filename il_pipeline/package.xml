@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>il_pipeline</name>
+  <version>0.1.0</version>
+  <description>Imitation learning pipeline for manipulation, designed as a modular extension to the MyBotShop ROS 2 robotic webserver platform. Provides three ROS 2 nodes (data logger, inference, simulated robot), a FastAPI web layer that mirrors the documented WebSocket / REST contract, and BC + ACT training pipelines.</description>
+  <maintainer email="naeemzainuddin5253@gmail.com">Naeem Zain Uddin</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>il_pipeline_msgs</depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

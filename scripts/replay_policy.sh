@@ -17,7 +17,7 @@ cd "$REPO_ROOT"
 
 source /opt/ros/jazzy/setup.bash
 source /tmp/mybotshop_ws/install/setup.bash
-export PYTHONPATH="$PYTHONPATH:$REPO_ROOT/src"
+export PYTHONPATH="$PYTHONPATH:$REPO_ROOT/il_pipeline"
 
 CKPT="$REPO_ROOT/runs/panda_reach_v1_bc/best.pt"
 if [ ! -f "$CKPT" ]; then
@@ -31,12 +31,12 @@ pkill -f "inference_node"       2>/dev/null || true
 sleep 1
 
 echo "=== Starting pybullet_robot_node ==="
-/usr/bin/python3 src/il_pipeline/nodes/pybullet_robot_node.py > /tmp/replay_pb.log 2>&1 &
+/usr/bin/python3 il_pipeline/il_pipeline/nodes/pybullet_robot_node.py > /tmp/replay_pb.log 2>&1 &
 PB_PID=$!
 sleep 3
 
 echo "=== Starting inference_node ==="
-/usr/bin/python3 src/il_pipeline/nodes/inference_node.py \
+/usr/bin/python3 il_pipeline/il_pipeline/nodes/inference_node.py \
     --ros-args \
     -p checkpoint_path:="$CKPT" \
     -p policy_type:=bc \

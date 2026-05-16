@@ -29,7 +29,7 @@ cd "$REPO_ROOT"
 
 source /opt/ros/jazzy/setup.bash > /dev/null
 source /tmp/mybotshop_ws/install/setup.bash > /dev/null
-export PYTHONPATH="$PYTHONPATH:$REPO_ROOT/src"
+export PYTHONPATH="$PYTHONPATH:$REPO_ROOT/il_pipeline"
 
 if [ ! -f "$CKPT" ]; then
     echo "ERROR: checkpoint not found: $CKPT"
@@ -37,14 +37,14 @@ if [ ! -f "$CKPT" ]; then
 fi
 
 echo "=== Starting pybullet_robot_node ==="
-/usr/bin/python3 -u src/il_pipeline/nodes/pybullet_robot_node.py \
+/usr/bin/python3 -u il_pipeline/il_pipeline/nodes/pybullet_robot_node.py \
     --ros-args -p seed:=1000 \
     > /tmp/eval_pb.log 2>&1 &
 PB_PID=$!
 sleep 3
 
 echo "=== Starting inference_node ==="
-/usr/bin/python3 -u src/il_pipeline/nodes/inference_node.py \
+/usr/bin/python3 -u il_pipeline/il_pipeline/nodes/inference_node.py \
     --ros-args \
     -p checkpoint_path:="$CKPT" \
     -p policy_type:="$POLICY_TYPE" \

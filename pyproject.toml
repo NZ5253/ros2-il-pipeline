@@ -1,59 +1,9 @@
-[build-system]
-requires = ["setuptools>=64", "wheel"]
-build-backend = "setuptools.build_meta"
-
-[project]
-name = "il_pipeline"
-version = "0.1.0"
-description = "Imitation learning pipeline for the MyBotShop robotic webserver"
-readme = "README.md"
-requires-python = ">=3.10"
-authors = [
-    { name = "Naeem Zain Uddin", email = "naeemzainuddin5253@gmail.com" }
-]
-license = { text = "MIT" }
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
-]
-dependencies = [
-    "numpy>=1.24",
-    "torch>=2.0",
-    "pyarrow>=14",
-    "pydantic>=2.0",
-]
-
-[project.optional-dependencies]
-web = [
-    "fastapi>=0.110",
-    "uvicorn[standard]>=0.27",
-    "websockets>=12",
-]
-lerobot = [
-    "lerobot>=0.1",
-    "datasets>=2.16",
-    "huggingface-hub>=0.20",
-]
-dev = [
-    "pytest>=7.4",
-    "pytest-cov>=4.1",
-    "ruff>=0.1",
-    "mypy>=1.7",
-]
-
-[project.scripts]
-il-train = "il_pipeline.training.train:main"
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.setuptools.package-dir]
-"" = "src"
+# Project-level Python config.
+#
+# The il_pipeline package itself is a ROS 2 ament_python package built via colcon
+# (see il_pipeline/package.xml + il_pipeline/setup.py). This pyproject.toml is
+# only for repo-wide tooling: pytest, ruff, mypy. Treat it as a dev convenience,
+# not a pip-installable package definition.
 
 [tool.ruff]
 line-length = 100
@@ -66,3 +16,4 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --strict-markers"
+pythonpath = ["il_pipeline"]

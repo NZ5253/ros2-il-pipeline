@@ -39,31 +39,34 @@ The pipeline integrates with the MyBotShop platform through ROS 2 service and to
 mybotshop_evaluation/
 ├── PLAN.md                              project plan
 ├── README.md                            this file
-├── docs/
+├── WORKSTATION_RUNBOOK.md               exact lab PC commands
+├── Projektübersicht.md                  brief project overview for the application
+├── pyproject.toml                       repo-wide pytest + ruff config
+├── requirements.txt                     non-ROS Python deps
+├── docs/                                technical documentation
 │   ├── 01_technical_concept.md          main technical document
-│   ├── 02_architecture_diagrams.md      system, ROS 2, data, training, inference diagrams
+│   ├── 02_architecture_diagrams.md      6 mermaid diagrams
 │   ├── 03_api_specification.md          REST + WebSocket API spec
-│   └── 04_dataset_schema.md             LeRobotDataset schema details
-├── src/
-│   ├── il_pipeline/
-│   │   ├── nodes/
-│   │   │   ├── data_logger_node.py      records demonstrations
-│   │   │   └── inference_node.py        runs the trained policy
-│   │   ├── dataset/
-│   │   │   ├── lerobot_writer.py        parquet shard writer
-│   │   │   └── frame_validator.py       per-frame validation
-│   │   ├── training/
-│   │   │   ├── train.py                 training entry point
-│   │   │   ├── policy_factory.py        BC/ACT/Diffusion dispatch
-│   │   │   └── lerobot_torch_dataset.py PyTorch dataset adapter
-│   │   └── inference/
-│   │       ├── policy_loader.py         checkpoint loader
-│   │       └── normaliser.py            input/output normalisation
-│   └── web_api/
-│       └── app.py                       FastAPI service
-├── configs/                             example launch configs and scenes
-├── scripts/                             helper scripts (data collection, eval)
-└── tests/                               unit tests
+│   ├── 04_dataset_schema.md             LeRobotDataset schema details
+│   ├── 05_evaluation_results.md         real numbers from CPU validation
+│   ├── 06_demo_storyboard.md            video recording plan
+│   └── diagrams/                        training-curve PNGs
+├── il_pipeline/                         ROS 2 ament_python package
+│   ├── package.xml
+│   ├── setup.py
+│   ├── setup.cfg
+│   ├── resource/il_pipeline             ament index marker
+│   ├── launch/pipeline.launch.py
+│   └── il_pipeline/                     the Python package
+│       ├── nodes/                       data_logger, inference, pybullet_robot
+│       ├── dataset/                     LeRobot parquet writer + frame validator
+│       ├── training/                    BC policy + LeRobot dataset adapter
+│       ├── inference/                   policy loader + normaliser
+│       └── web_api/                     FastAPI service + ROS bridge
+├── il_pipeline_msgs/                    ROS 2 ament_cmake package (.srv/.msg/.action)
+├── configs/                             YAML parameter files
+├── scripts/                             CLI utilities (collect, train, evaluate, plot, demo)
+└── tests/                               23 unit tests
 ```
 
 ---
@@ -105,25 +108,33 @@ pip install -r requirements.txt
 # LeRobot
 pip install lerobot
 
-# Install the MyBotShop platform locally (see their docs)
-# https://docs.mybotshop.de/projects/product_robot_webserver/html/index.html
+# The MyBotShop platform itself is a commercial product that ships
+# pre-installed with their robot hardware (no public install path).
+# See docs/01_technical_concept.md section 10b for the integration model.
+```
+
+### Build the ROS 2 packages
+
+```bash
+mkdir -p ros2_ws/src
+cp -r il_pipeline il_pipeline_msgs ros2_ws/src/
+cd ros2_ws
+source /opt/ros/jazzy/setup.bash
+colcon build --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3
+source install/setup.bash
 ```
 
 ### Run
 
 ```bash
-# Terminal 1 — start the MyBotShop platform (according to their docs)
+# Single-command bring-up (data logger + inference + pybullet sim + FastAPI):
+ros2 launch il_pipeline pipeline.launch.py
 
-# Terminal 2 — start the data logger
-ros2 run il_pipeline data_logger_node --ros-args \
-    --params-file configs/data_logger.yaml
-
-# Terminal 3 — start the inference node (idle until a policy is loaded)
-ros2 run il_pipeline inference_node --ros-args \
-    --params-file configs/inference.yaml
-
-# Terminal 4 — start the web API
-uvicorn il_pipeline.web_api.app:app --host 0.0.0.0 --port 8000
+# Or each node individually:
+ros2 run il_pipeline pybullet_robot_node      # simulated Franka stand-in
+ros2 run il_pipeline data_logger_node
+ros2 run il_pipeline inference_node
+python3 -m uvicorn il_pipeline.web_api.app:app --host 0.0.0.0 --port 8011
 ```
 
 OpenAPI docs are available at `http://localhost:8000/api/v1/docs`.

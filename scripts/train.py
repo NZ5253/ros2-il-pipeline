@@ -31,7 +31,7 @@ import numpy as np
 import torch
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT / "src"))
+sys.path.insert(0, str(REPO_ROOT / "il_pipeline"))
 
 from il_pipeline.training.lerobot_torch_dataset import LeRobotTorchDataset  # noqa: E402
 from il_pipeline.training.train import BCPolicy  # noqa: E402

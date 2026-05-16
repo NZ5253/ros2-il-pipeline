@@ -38,15 +38,17 @@ python3 -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device
 
 ---
 
-## 2. Build the custom ROS 2 interfaces
+## 2. Build the ROS 2 packages
+
+The repo contains two ROS 2 packages: `il_pipeline_msgs` (custom interfaces, ament_cmake) and `il_pipeline` (nodes + launch, ament_python).
 
 ```bash
 mkdir -p ros2_ws/src
 cp -r il_pipeline_msgs ros2_ws/src/
+cp -r il_pipeline      ros2_ws/src/
 cd ros2_ws
 source /opt/ros/jazzy/setup.bash
-colcon build --packages-select il_pipeline_msgs \
-    --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3
+colcon build --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3
 source install/setup.bash
 cd ..
 ```
@@ -54,8 +56,19 @@ cd ..
 Verify:
 
 ```bash
+ros2 pkg list | grep il_pipeline       # both packages present
 ros2 interface show il_pipeline_msgs/srv/StartEpisode
+ros2 pkg executables il_pipeline       # data_logger_node, inference_node, pybullet_robot_node
+ros2 launch il_pipeline pipeline.launch.py --show-args
 ```
+
+If `ros2 pkg list` shows `il_pipeline_msgs` but not `il_pipeline`, your colcon-ros may have a hook-generation quirk (seen on Linux Mint with colcon-ros 0.5.0). Workaround:
+
+```bash
+export AMENT_PREFIX_PATH=$(pwd)/ros2_ws/install/il_pipeline:$AMENT_PREFIX_PATH
+```
+
+Stock Ubuntu 24.04 + ROS Jazzy installs work without this workaround.
 
 ---
 

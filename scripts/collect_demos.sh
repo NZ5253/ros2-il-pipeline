@@ -28,19 +28,19 @@ cd "$REPO_ROOT"
 
 source /opt/ros/jazzy/setup.bash > /dev/null
 source /tmp/mybotshop_ws/install/setup.bash > /dev/null
-export PYTHONPATH="$PYTHONPATH:$REPO_ROOT/src"
+export PYTHONPATH="$PYTHONPATH:$REPO_ROOT/il_pipeline"
 
 rm -rf "${DATASET_ROOT:?}/${DATASET_NAME:?}"
 mkdir -p "$DATASET_ROOT"
 
 echo "=== Starting pybullet_robot_node ==="
-/usr/bin/python3 -u src/il_pipeline/nodes/pybullet_robot_node.py \
+/usr/bin/python3 -u il_pipeline/il_pipeline/nodes/pybullet_robot_node.py \
     --ros-args -p seed:=0 \
     > /tmp/collect_pb.log 2>&1 &
 PB_PID=$!
 
 echo "=== Starting data_logger_node ==="
-/usr/bin/python3 -u src/il_pipeline/nodes/data_logger_node.py \
+/usr/bin/python3 -u il_pipeline/il_pipeline/nodes/data_logger_node.py \
     --ros-args \
     -p dataset_root:="$DATASET_ROOT" \
     -p dataset_name:="$DATASET_NAME" \
