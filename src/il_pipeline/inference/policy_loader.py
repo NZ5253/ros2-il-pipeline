@@ -151,13 +151,11 @@ class _ActAdapter(nn.Module):
             "observation.state": state,
             "observation.environment_state": env,
         }
-        # select_action pops one action from the chunk queue; on empty queue
-        # it runs the model and refills.
+        # select_action pops one action from ACT's internal chunk queue and
+        # returns shape [batch, action_dim]. Squeeze batch and reshape into
+        # the [chunk_size, action_dim] contract the inference node expects.
         action = self.inner.select_action(batch)
-        # The inference node expects shape [chunk_size, action_dim]. Return
-        # a single-step chunk; the node will pick action[0] in first_action
-        # execution mode.
-        return action.unsqueeze(0)
+        return action.squeeze(0).unsqueeze(0)   # [1, action_dim]
 
 
 # ── Helpers for old BC checkpoints without explicit dims ────────────────
