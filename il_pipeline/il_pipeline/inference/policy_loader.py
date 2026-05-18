@@ -44,6 +44,8 @@ def load_policy(
         return _load_bc(ckpt, cfg, device)
     if policy_type == "act":
         return _load_act(ckpt, cfg, device)
+    if policy_type == "diffusion":
+        return _load_diffusion(ckpt, cfg, device)
     raise ValueError(f"unknown policy_type: {policy_type}")
 
 
@@ -99,7 +101,10 @@ def _load_act(ckpt: dict, cfg: dict, device: torch.device):
     config = ACTConfig(
         n_obs_steps=1,
         chunk_size=chunk_size,
-        n_action_steps=chunk_size,
+        # Must be 1 when temporal_ensemble_coeff is set: the policy is
+        # queried every step and the ensembler blends predictions for the
+        # current timestep across all overlapping chunks in the window.
+        n_action_steps=1,
         input_features=input_features,
         output_features=output_features,
         normalization_mapping={
@@ -114,6 +119,11 @@ def _load_act(ckpt: dict, cfg: dict, device: torch.device):
         kl_weight=10.0,
         dropout=0.1,
         use_vae=True,
+        # Canonical ACT deployment from the original paper: blend overlapping
+        # chunk predictions with exponential weighting. Without this, the
+        # policy runs each chunk open-loop and only re-plans every chunk_size
+        # steps — the brittle mode the paper argues against.
+        temporal_ensemble_coeff=0.01,
         push_to_hub=False,
     )
     inner = ACTPolicy(config).to(device)
@@ -129,14 +139,21 @@ class _ActAdapter(nn.Module):
     `predict_action_chunk(obs_tensor)` API as the BC policy.
 
     Splits the 21-D `observation.state` tensor into the STATE+ENV streams
-    ACT expects, calls ACTPolicy.select_action (which internally maintains
-    a chunk queue), and returns the next action as a single-step chunk.
+    ACT expects, calls ACTPolicy.select_action (which runs temporal
+    ensembling internally), and returns the ensembled action as a
+    single-step chunk.
     """
 
     def __init__(self, inner, proprio_dim: int) -> None:
         super().__init__()
         self.inner = inner
         self.proprio_dim = proprio_dim
+
+    def reset(self) -> None:
+        # Clears the temporal ensembler buffer between episodes — otherwise
+        # the first few actions of a new rollout are still influenced by
+        # the predictions from the end of the previous one.
+        self.inner.reset()
 
     @torch.inference_mode()
     def predict_action_chunk(self, observation: torch.Tensor) -> torch.Tensor:
@@ -153,6 +170,87 @@ class _ActAdapter(nn.Module):
         # select_action pops one action from ACT's internal chunk queue and
         # returns shape [batch, action_dim]. Squeeze batch and reshape into
         # the [chunk_size, action_dim] contract the inference node expects.
+        action = self.inner.select_action(batch)
+        return action.squeeze(0).unsqueeze(0)   # [1, action_dim]
+
+
+# ── Diffusion Policy ─────────────────────────────────────────────────────
+
+
+def _load_diffusion(ckpt: dict, cfg: dict, device: torch.device):
+    """Rebuild LeRobot Diffusion Policy with the same config used at
+    training time, load weights, and wrap with predict_action_chunk."""
+    from lerobot.configs.types import FeatureType, NormalizationMode, PolicyFeature
+    from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
+    from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
+
+    state_dim = cfg["state_dim"]
+    action_dim = cfg["action_dim"]
+    horizon = cfg.get("horizon") or cfg.get("chunk_size", 16)
+    n_joints = 7
+    proprio_dim = 2 * n_joints
+    env_dim = state_dim - proprio_dim
+
+    input_features = {
+        "observation.state": PolicyFeature(type=FeatureType.STATE, shape=(proprio_dim,)),
+        "observation.environment_state": PolicyFeature(type=FeatureType.ENV, shape=(env_dim,)),
+    }
+    output_features = {
+        "action": PolicyFeature(type=FeatureType.ACTION, shape=(action_dim,)),
+    }
+    config = DiffusionConfig(
+        n_obs_steps=1,
+        horizon=horizon,
+        n_action_steps=max(1, horizon // 2),
+        input_features=input_features,
+        output_features=output_features,
+        normalization_mapping={
+            "STATE": NormalizationMode.MEAN_STD,
+            "ENV": NormalizationMode.MEAN_STD,
+            "ACTION": NormalizationMode.MEAN_STD,
+        },
+        down_dims=(64, 128, 256),
+        num_inference_steps=10,
+        push_to_hub=False,
+    )
+    inner = DiffusionPolicy(config).to(device)
+    inner.load_state_dict(ckpt["state_dict"])
+    inner.eval()
+
+    return _DiffusionAdapter(inner, proprio_dim).to(device), Normaliser.identity(device=device)
+
+
+class _DiffusionAdapter(nn.Module):
+    """
+    Wraps LeRobot DiffusionPolicy so the inference node sees the same
+    `predict_action_chunk(obs)` API as BC and ACT.
+
+    DP's select_action runs the full DDPM denoising chain on each call and
+    pops one action from its internal queue (queue refills every
+    n_action_steps). Observations need an explicit time dim since
+    n_obs_steps=1.
+    """
+
+    def __init__(self, inner, proprio_dim: int) -> None:
+        super().__init__()
+        self.inner = inner
+        self.proprio_dim = proprio_dim
+
+    def reset(self) -> None:
+        self.inner.reset()
+
+    @torch.inference_mode()
+    def predict_action_chunk(self, observation: torch.Tensor) -> torch.Tensor:
+        if observation.ndim == 1:
+            observation = observation.unsqueeze(0)
+        state = observation[..., : self.proprio_dim]
+        env = observation[..., self.proprio_dim :]
+        batch = {
+            # Diffusion expects [B, n_obs_steps, dim]; we trained with
+            # n_obs_steps=1, so add the singleton time dim.
+            "observation.state": state.unsqueeze(1),
+            "observation.environment_state": env.unsqueeze(1),
+        }
         action = self.inner.select_action(batch)
         return action.squeeze(0).unsqueeze(0)   # [1, action_dim]
 

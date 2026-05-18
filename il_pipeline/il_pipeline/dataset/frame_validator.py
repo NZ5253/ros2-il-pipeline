@@ -20,6 +20,9 @@ class FrameValidator:
     expected_n_joints: int
     expected_action_dim: int
     expected_fps: float
+    # 3-D xyz of the task object when recording object-aware demos. 0 means
+    # state-only (joints + EE pose only).
+    expected_object_dim: int = 0
     max_fps_deviation: float = 0.1   # ±10% of declared fps is acceptable
 
     _prev_timestamp: float = -1.0
@@ -29,7 +32,10 @@ class FrameValidator:
         if state is None:
             return False, "missing observation.state"
 
-        expected_state_dim = 2 * self.expected_n_joints + 7  # pos + vel + EE pose
+        # joint pos + joint vel + EE pose (xyz+quat) + optional object xyz
+        expected_state_dim = (
+            2 * self.expected_n_joints + 7 + self.expected_object_dim
+        )
         if len(state) != expected_state_dim:
             return (
                 False,

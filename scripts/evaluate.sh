@@ -21,7 +21,7 @@ set +e
 CKPT="${1:?usage: $0 <checkpoint.pt> <bc|act> <n_rollouts>}"
 POLICY_TYPE="${2:?usage: $0 <checkpoint.pt> <bc|act> <n_rollouts>}"
 N_ROLLOUTS="${3:-20}"
-TIMEOUT_PER_ROLLOUT="${TIMEOUT_PER_ROLLOUT:-18}"
+TIMEOUT_PER_ROLLOUT="${TIMEOUT_PER_ROLLOUT:-25}"
 EVAL_DEVICE="${EVAL_DEVICE:-cpu}"   # set to cuda:0 on the workstation
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"

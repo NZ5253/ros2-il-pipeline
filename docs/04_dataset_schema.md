@@ -75,7 +75,7 @@ Each frame in a parquet shard has these fields:
 
 | Field | Dtype | Shape | Description |
 |---|---|---|---|
-| `observation.state` | float32 | `[state_dim]` | Concatenated joint positions, joint velocities, EE pose (xyzquat) |
+| `observation.state` | float32 | `[state_dim]` | Joint positions, joint velocities, EE pose (xyzquat), and — for object-aware tasks — the task object's xyz |
 | `observation.images.wrist_cam` | uint8 video | `[H, W, 3]` | Wrist camera RGB (optional) |
 | `observation.images.scene_cam` | uint8 video | `[H, W, 3]` | Scene camera RGB (optional) |
 | `action` | float32 | `[action_dim]` | Commanded action at this step |
@@ -86,7 +86,12 @@ Each frame in a parquet shard has these fields:
 | `next.done` | bool | scalar | True on the last frame of an episode |
 | `task_index` | int64 | scalar | Index into `tasks.jsonl` |
 
-`state_dim` and `action_dim` depend on the robot. For Franka Panda with delta-joint actions: `state_dim = 7 + 7 + 7 = 21` (joint pos + joint vel + EE xyzrpy), `action_dim = 7`.
+`state_dim` and `action_dim` depend on the robot and task. For Franka Panda with delta-EE actions:
+
+- **Proprioception only** (general-purpose): `state_dim = 7 + 7 + 7 = 21` (joint pos + joint vel + EE xyzquat)
+- **Object-aware** (pick-and-place with randomised object pose, the configuration used for ACT/DP training): `state_dim = 7 + 7 + 7 + 3 = 24` (adds task object xyz)
+
+`action_dim = 7` in both cases (delta-EE 6-DOF Twist + gripper command). Random-object manipulation is severely underspecified without the object's pose in the observation — Robomimic and ALOHA include it for the same reason.
 
 Images are stored as video files referenced by the video_path template, not inline in parquet, for efficient storage and decoding.
 
@@ -97,23 +102,27 @@ Images are stored as video files referenced by the video_path template, not inli
 `observation.state` is a concatenation in a documented, fixed order:
 
 ```
-state[0:N_joints]            joint_positions     (radians)
-state[N_joints:2*N_joints]   joint_velocities    (rad/s)
-state[2*N_joints:2*N_joints+3]   ee_position_xyz     (metres)
-state[2*N_joints+3:2*N_joints+7] ee_orientation_quat (xyzw, normalised)
+state[0:N_joints]                  joint_positions     (radians)
+state[N_joints:2*N_joints]         joint_velocities    (rad/s)
+state[2*N_joints:2*N_joints+3]     ee_position_xyz     (metres, world frame)
+state[2*N_joints+3:2*N_joints+7]   ee_orientation_quat (xyzw, normalised)
+state[2*N_joints+7:2*N_joints+10]  object_position_xyz (metres, world frame, optional)
 ```
+
+The last three dimensions are present iff `expected_object_dim=3` was set on the `FrameValidator` (controlled by the `enable_object_pose` parameter on the data logger and inference nodes). For platform-agnostic non-manipulation tasks they're omitted and `state_dim = 21`.
 
 The order is recorded in `info.json` under `features.observation.state.names` so consumers can verify before consuming:
 
 ```json
 "observation.state": {
   "dtype": "float32",
-  "shape": [21],
+  "shape": [24],
   "names": [
     "panda_joint1.pos", "panda_joint2.pos", "...", "panda_joint7.pos",
     "panda_joint1.vel", "...", "panda_joint7.vel",
     "ee.x", "ee.y", "ee.z",
-    "ee.qx", "ee.qy", "ee.qz", "ee.qw"
+    "ee.qx", "ee.qy", "ee.qz", "ee.qw",
+    "object.x", "object.y", "object.z"
   ]
 }
 ```

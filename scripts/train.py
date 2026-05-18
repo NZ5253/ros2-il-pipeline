@@ -116,6 +116,57 @@ def collate_for_act(batch_list: list[dict]) -> dict:
     return out
 
 
+def build_diffusion_policy(state_dim: int, action_dim: int, horizon: int,
+                           dataset_stats: dict | None = None):
+    """Build LeRobot Diffusion Policy for the same state-only setup as ACT.
+
+    Uses a smaller UNet (down_dims=(64,128,256), ~4.5M params) rather than
+    the default (512,1024,2048) which gives ~250M params and would overfit
+    a 40-demo dataset. Sized to match ACT (5.84M) for a fair comparison.
+    """
+    try:
+        from lerobot.configs.types import (
+            FeatureType,
+            NormalizationMode,
+            PolicyFeature,
+        )
+        from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
+        from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
+    except ImportError as e:
+        raise RuntimeError(
+            "lerobot is required for --policy diffusion. Install with `pip install lerobot`."
+        ) from e
+
+    n_joints = 7
+    proprio_dim = 2 * n_joints
+    env_dim = state_dim - proprio_dim
+    input_features = {
+        "observation.state": PolicyFeature(type=FeatureType.STATE, shape=(proprio_dim,)),
+        "observation.environment_state": PolicyFeature(type=FeatureType.ENV, shape=(env_dim,)),
+    }
+    output_features = {
+        "action": PolicyFeature(type=FeatureType.ACTION, shape=(action_dim,)),
+    }
+    config = DiffusionConfig(
+        n_obs_steps=1,
+        horizon=horizon,
+        n_action_steps=max(1, horizon // 2),
+        input_features=input_features,
+        output_features=output_features,
+        normalization_mapping={
+            "STATE": NormalizationMode.MEAN_STD,
+            "ENV": NormalizationMode.MEAN_STD,
+            "ACTION": NormalizationMode.MEAN_STD,
+        },
+        down_dims=(64, 128, 256),
+        # 10 DDPM steps at inference keeps latency well under 33 ms; default
+        # is 100 which is far slower than the control budget allows.
+        num_inference_steps=10,
+        push_to_hub=False,
+    )
+    return DiffusionPolicy(config, dataset_stats=dataset_stats)
+
+
 # ─────────────────────────────────────────────────────────────────────────
 
 
@@ -123,12 +174,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--policy", choices=["bc", "act"], default="bc")
+    parser.add_argument("--policy", choices=["bc", "act", "diffusion"], default="bc")
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--chunk-size", type=int, default=50,
                         help="ACT only — number of future actions to predict per step")
+    parser.add_argument("--horizon", type=int, default=16,
+                        help="Diffusion only — UNet planning horizon")
     parser.add_argument("--hidden", type=int, default=256, help="BC only — hidden dim")
     parser.add_argument("--validation-split", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=42)
@@ -143,11 +196,16 @@ def main() -> None:
     np.random.seed(args.seed)
 
     # ── dataset ──────────────────────────────────────────────────────────
-    chunk = args.chunk_size if args.policy == "act" else 1
-    # ACT normalizes internally from dataset_stats; skip dataset-level normalization
-    # to avoid double-normalizing inputs (training/inference would be inconsistent).
+    if args.policy == "act":
+        chunk = args.chunk_size
+    elif args.policy == "diffusion":
+        chunk = args.horizon
+    else:
+        chunk = 1
+    # ACT and Diffusion both normalize internally from dataset_stats; skip
+    # dataset-level normalization for them to avoid double-normalizing.
     ds = LeRobotTorchDataset(args.dataset, chunk_size=chunk,
-                             normalize=(args.policy != "act"))
+                             normalize=(args.policy == "bc"))
     print(f"[dataset] {len(ds)} samples  state_dim={ds.state_dim}  action_dim={ds.action_dim}  chunk={chunk}")
 
     n_val = max(1, int(len(ds) * args.validation_split))
@@ -171,10 +229,9 @@ def main() -> None:
         policy = build_bc_policy(state_dim=ds.state_dim, action_dim=ds.action_dim,
                                  hidden=args.hidden).to(device)
     else:
-        # ACT needs dataset normalisation stats up front (it builds normalisers
-        # at construction time so they're part of the policy state_dict).
-        # We also need to split stats for observation.state into the two
-        # feature streams ACT expects.
+        # ACT and Diffusion both need dataset normalisation stats up front so
+        # they build normalisers that get saved into the policy state_dict.
+        # Same STATE+ENV split is used by both.
         stats_path = args.dataset / "meta" / "stats.json"
         raw_stats = json.loads(stats_path.read_text())
         n_joints = 7
@@ -190,10 +247,16 @@ def main() -> None:
             "observation.environment_state": split_state_stat(state_stat, slice(proprio_dim, None)),
             "action": {k: torch.tensor(v, dtype=torch.float32) for k, v in action_stat.items()},
         }
-        policy = build_act_policy(
-            state_dim=ds.state_dim, action_dim=ds.action_dim, chunk_size=chunk,
-            dataset_stats=dataset_stats,
-        ).to(device)
+        if args.policy == "act":
+            policy = build_act_policy(
+                state_dim=ds.state_dim, action_dim=ds.action_dim, chunk_size=chunk,
+                dataset_stats=dataset_stats,
+            ).to(device)
+        else:  # diffusion
+            policy = build_diffusion_policy(
+                state_dim=ds.state_dim, action_dim=ds.action_dim, horizon=chunk,
+                dataset_stats=dataset_stats,
+            ).to(device)
 
     optim = torch.optim.AdamW(policy.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -213,15 +276,21 @@ def main() -> None:
     proprio_dim = 2 * n_joints
 
     def _adapt_batch_for_policy(batch: dict) -> dict:
-        """For ACT, split observation.state into STATE (proprio) + ENV (EE pose)
-        and add the action_is_pad mask the model expects."""
-        if args.policy != "act":
+        """Split observation.state into STATE (proprio) + ENV (EE pose) and
+        add the action_is_pad mask. Diffusion also needs a time dim on
+        observations (n_obs_steps=1 → unsqueeze to [B, 1, dim])."""
+        if args.policy == "bc":
             return batch
         state = batch["observation.state"]                # [B, 21]
         action = batch["action"]                          # [B, chunk, 7]
         b = {k: v for k, v in batch.items() if k != "observation.state"}
         b["observation.state"] = state[..., :proprio_dim]
         b["observation.environment_state"] = state[..., proprio_dim:]
+        if args.policy == "diffusion":
+            # Diffusion's policy.forward expects [B, n_obs_steps, dim];
+            # n_obs_steps=1 here so just add a singleton time dim.
+            b["observation.state"] = b["observation.state"].unsqueeze(1)
+            b["observation.environment_state"] = b["observation.environment_state"].unsqueeze(1)
         # All chunk frames are real (we drop the tail in the DataLoader).
         b["action_is_pad"] = torch.zeros(
             action.shape[:2], dtype=torch.bool, device=action.device,
@@ -251,10 +320,10 @@ def main() -> None:
             train_losses.append(float(loss.detach().cpu()))
 
         # ACT's forward() relies on the VAE encoder which is bypassed in
-        # eval() mode, so its loss is undefined there. Keep the policy in
-        # train mode during validation but disable grad — this gives a
-        # consistent validation signal that's still cheap.
-        if args.policy == "act":
+        # eval() mode, so its loss is undefined there. Same trick works for
+        # Diffusion (its training loss is the denoising MSE which is the
+        # same in train and eval). Keep them in train mode with grad off.
+        if args.policy in ("act", "diffusion"):
             policy.train()
         else:
             policy.eval()
@@ -288,6 +357,7 @@ def main() -> None:
                     "dataset_path": str(args.dataset),
                     "hidden": args.hidden,
                     "chunk_size": chunk,
+                    "horizon": chunk if args.policy == "diffusion" else None,
                 },
             }, args.output / "best.pt")
 

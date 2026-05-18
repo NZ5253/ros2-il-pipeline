@@ -51,6 +51,12 @@ class InferenceNode(Node):
         self.declare_parameter("cmd_topic", "/cmd_robot")
         self.declare_parameter("image_topic", "/camera/image_raw")
         self.declare_parameter("enable_camera", False)
+        # Same task-object pose channel the data logger records — has to be
+        # subscribed at inference too so the policy gets the obs it was
+        # trained on. Without this, the deployed policy sees zeros where it
+        # learned to expect the cube position.
+        self.declare_parameter("object_pose_topic", "/cube_pose")
+        self.declare_parameter("enable_object_pose", True)
         self.declare_parameter("device", "cuda:0")
 
         self._policy = None
@@ -69,7 +75,11 @@ class InferenceNode(Node):
         # Latest sensor values
         self._latest_joint_state: JointState | None = None
         self._latest_pose: PoseStamped | None = None
+        self._latest_object_pose: PoseStamped | None = None
         self._latest_image: Image | None = None
+        self._enable_object_pose = (
+            self.get_parameter("enable_object_pose").get_parameter_value().bool_value
+        )
 
         # Action chunk buffer for ACT temporal ensembling
         self._chunk_buffer: deque[tuple[int, np.ndarray]] = deque(maxlen=50)
@@ -93,6 +103,13 @@ class InferenceNode(Node):
             self._on_pose,
             sensor_qos,
         )
+        if self._enable_object_pose:
+            self.create_subscription(
+                PoseStamped,
+                self.get_parameter("object_pose_topic").value,
+                self._on_object_pose,
+                sensor_qos,
+            )
         if self.get_parameter("enable_camera").value:
             self.create_subscription(
                 Image,
@@ -138,6 +155,9 @@ class InferenceNode(Node):
     def _on_pose(self, msg: PoseStamped) -> None:
         self._latest_pose = msg
 
+    def _on_object_pose(self, msg: PoseStamped) -> None:
+        self._latest_object_pose = msg
+
     def _on_image(self, msg: Image) -> None:
         self._latest_image = msg
 
@@ -170,6 +190,7 @@ class InferenceNode(Node):
     def _build_observation(self) -> dict | None:
         js = self._latest_joint_state
         pose = self._latest_pose
+        obj = self._latest_object_pose
         if js is None:
             return None
 
@@ -187,7 +208,17 @@ class InferenceNode(Node):
             )
         else:
             ee = np.zeros(7, dtype=np.float32)
-        state = np.concatenate([joint_pos, joint_vel, ee])
+        parts = [joint_pos, joint_vel, ee]
+        if self._enable_object_pose:
+            if obj is not None:
+                obj_xyz = np.array(
+                    [obj.pose.position.x, obj.pose.position.y, obj.pose.position.z],
+                    dtype=np.float32,
+                )
+            else:
+                obj_xyz = np.zeros(3, dtype=np.float32)
+            parts.append(obj_xyz)
+        state = np.concatenate(parts)
 
         obs = {"observation.state": state}
         if self._latest_image is not None:
@@ -289,6 +320,10 @@ class InferenceNode(Node):
         self._running = True
         self._step_index = 0
         self._chunk_buffer.clear()
+        # Policies that hold internal state across calls (ACT's temporal
+        # ensembler, action queues) need to clear it on each new rollout.
+        if hasattr(self._policy, "reset"):
+            self._policy.reset()
         response.success = True
         response.message = "running"
         return response

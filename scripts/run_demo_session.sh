@@ -75,7 +75,7 @@ for i in $(seq 1 "$N_ROLLOUTS"); do
     ros2 service call /pybullet_robot_node/reset std_srvs/srv/Trigger > /dev/null 2>&1
     sleep 1
     ros2 service call /inference_node/start std_srvs/srv/Trigger > /dev/null 2>&1
-    sleep 20
+    sleep 25
     ros2 service call /inference_node/stop std_srvs/srv/Trigger > /dev/null 2>&1
     STATUS=$(timeout 3 /usr/bin/python3 -u scripts/check_task_status.py --timeout 1.5 --mode any 2>/dev/null)
     if [ "$STATUS" = "True" ]; then

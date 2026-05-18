@@ -73,6 +73,12 @@ class DataLoggerNode(Node):
         self.declare_parameter("teleop_cmd_topic", "/teleop_cmd")
         self.declare_parameter("image_topic", "/camera/image_raw")
         self.declare_parameter("enable_camera", False)
+        # Task-object pose (e.g. the cube in pick-and-place). When enabled,
+        # the node subscribes and includes the object's xyz in
+        # observation.state. Standard practice in IL benchmarks (Robomimic,
+        # ALOHA) — random-object manipulation is underspecified without it.
+        self.declare_parameter("object_pose_topic", "/cube_pose")
+        self.declare_parameter("enable_object_pose", True)
         self.declare_parameter("expected_fps", 30.0)
         self.declare_parameter("expected_n_joints", 7)
         self.declare_parameter("action_dim", 7)
@@ -94,9 +100,13 @@ class DataLoggerNode(Node):
         # Latest values, sampled at action publication rate to form a frame
         self._latest_joint_state: JointState | None = None
         self._latest_pose: PoseStamped | None = None
+        self._latest_object_pose: PoseStamped | None = None
         self._latest_image: Image | None = None
         self._latest_action: np.ndarray | None = None
         self._latest_action_t: float = 0.0
+        self._enable_object_pose = (
+            self.get_parameter("enable_object_pose").get_parameter_value().bool_value
+        )
 
         self._episode: EpisodeBuffer | None = None
         self._writer = LeRobotShardWriter(
@@ -107,6 +117,7 @@ class DataLoggerNode(Node):
             expected_n_joints=self.get_parameter("expected_n_joints").value,
             expected_action_dim=self.get_parameter("action_dim").value,
             expected_fps=self.expected_fps,
+            expected_object_dim=3 if self._enable_object_pose else 0,
         )
 
         # ROS 2 wiring. QoS chosen for reliable but bounded queue depth.
@@ -128,6 +139,13 @@ class DataLoggerNode(Node):
             self._on_pose,
             sensor_qos,
         )
+        if self._enable_object_pose:
+            self._sub_object = self.create_subscription(
+                PoseStamped,
+                self.get_parameter("object_pose_topic").value,
+                self._on_object_pose,
+                sensor_qos,
+            )
         self._sub_teleop = self.create_subscription(
             Twist,
             self.get_parameter("teleop_cmd_topic").value,
@@ -170,6 +188,9 @@ class DataLoggerNode(Node):
     def _on_pose(self, msg: PoseStamped) -> None:
         self._latest_pose = msg
 
+    def _on_object_pose(self, msg: PoseStamped) -> None:
+        self._latest_object_pose = msg
+
     def _on_teleop(self, msg: Twist) -> None:
         # Convert Twist into the configured action representation.
         # For delta_ee, take linear and angular components directly.
@@ -205,9 +226,12 @@ class DataLoggerNode(Node):
     def _build_frame(self) -> dict:
         js = self._latest_joint_state
         pose = self._latest_pose
+        obj_pose = self._latest_object_pose
 
-        # Concatenate joint pos, joint vel, EE pose into observation.state.
-        # Order is documented in docs/04_dataset_schema.md.
+        # Concatenate joint pos, joint vel, EE pose, and (optionally) the
+        # task object's xyz into observation.state. Without the object pose
+        # the policy cannot solve random-spawn manipulation — see the schema
+        # doc for the dim breakdown.
         joint_pos = np.array(js.position, dtype=np.float32)
         joint_vel = np.array(js.velocity, dtype=np.float32) if js.velocity else np.zeros_like(joint_pos)
         if pose is not None:
@@ -220,7 +244,17 @@ class DataLoggerNode(Node):
         else:
             ee = np.zeros(7, dtype=np.float32)
 
-        state = np.concatenate([joint_pos, joint_vel, ee])
+        parts = [joint_pos, joint_vel, ee]
+        if self._enable_object_pose:
+            if obj_pose is not None:
+                obj_xyz = np.array(
+                    [obj_pose.pose.position.x, obj_pose.pose.position.y, obj_pose.pose.position.z],
+                    dtype=np.float32,
+                )
+            else:
+                obj_xyz = np.zeros(3, dtype=np.float32)
+            parts.append(obj_xyz)
+        state = np.concatenate(parts)
 
         frame = {
             "observation.state": state,
