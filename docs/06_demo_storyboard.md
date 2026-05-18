@@ -59,7 +59,7 @@ A 2–3 minute screen recording that walks the CEO through the deliverable. Reco
 
 ### Scene 7 — Evaluation results (15 s)
 
-- Screen: `docs/05_evaluation_results.md` Experiment 1 section
+- Screen: `docs/05_evaluation_results.md` Experiment 3 section (ACT results)
 - Voiceover: success rate over 20 rollouts (numbers filled in from `scripts/evaluate.sh`), inference latency, training time
 - Highlight: honest reporting, including any failure modes observed
 
@@ -80,10 +80,22 @@ A 2–3 minute screen recording that walks the CEO through the deliverable. Reco
 
 ## Recording setup
 
-- 1920×1080 at 30 fps
+On WSL (no native display): use `record_demo.sh` which sets up Xvfb + Mesa + ffmpeg automatically:
+
+```bash
+sudo apt-get install -y xvfb ffmpeg    # once
+bash scripts/record_demo.sh            # produces demo.mp4 (1280×720)
+```
+
+On native Linux with a real X11 display:
+
+```bash
+PYBULLET_GUI=1 bash scripts/run_demo_session.sh &
+ffmpeg -video_size 1920x1080 -framerate 30 -f x11grab -i :0.0 -t 180 -c:v libx264 -pix_fmt yuv420p demo.mp4
+```
+
 - Microphone: use built-in or a USB mic; record a separate clean voiceover and mix in post if quality matters
 - Quiet room, no notifications visible
-- `ffmpeg -video_size 1920x1080 -framerate 30 -f x11grab -i :0.0 -t 180 -c:v libx264 -pix_fmt yuv420p demo.mp4`
 
 ---
 

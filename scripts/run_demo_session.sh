@@ -5,17 +5,14 @@
 # Starts the full IL pipeline stack, loads the trained ACT policy, and runs
 # 5 pick-and-place rollouts with verbose output.
 #
-# GUI mode (PYBULLET_GUI=1) requires a native Linux desktop or Windows with
-# WSLg properly configured (DISPLAY set). Headless mode (default) runs the
-# same pipeline with no window.
+# GUI mode (PYBULLET_GUI=1) requires an X11 display (DISPLAY set).
+# On WSL, use Xvfb with LIBGL_ALWAYS_SOFTWARE=1 — or use record_demo.sh
+# which sets that up automatically and records to demo.mp4.
 #
 # Usage:
 #   bash scripts/run_demo_session.sh                # headless
-#   PYBULLET_GUI=1 bash scripts/run_demo_session.sh # GUI (needs X11/WSLg)
-#
-# For screen recording:
-#   ffmpeg -video_size 1920x1080 -framerate 30 -f x11grab -i :0.0 \
-#          -t 180 -c:v libx264 -pix_fmt yuv420p demo.mp4
+#   PYBULLET_GUI=1 bash scripts/run_demo_session.sh # GUI (needs X11)
+#   bash scripts/record_demo.sh                     # WSL-safe video recording
 
 set +e
 
@@ -24,6 +21,8 @@ POLICY_TYPE="${POLICY_TYPE:-act}"
 N_ROLLOUTS="${N_ROLLOUTS:-5}"
 EVAL_DEVICE="${EVAL_DEVICE:-cuda:0}"
 PYBULLET_GUI="${PYBULLET_GUI:-0}"
+# Convert 0/1 to the bool strings ROS 2 expects for declared bool parameters
+GUI_BOOL="false"; [ "$PYBULLET_GUI" = "1" ] && GUI_BOOL="true"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -36,7 +35,7 @@ echo "=== MyBotShop IL Pipeline Demo ==="
 echo "Policy: $POLICY_TYPE @ $POLICY_CKPT"
 echo "Device: $EVAL_DEVICE"
 echo "Rollouts: $N_ROLLOUTS"
-echo "GUI: $PYBULLET_GUI"
+echo "GUI: $GUI_BOOL"
 echo ""
 
 if [ ! -f "$POLICY_CKPT" ]; then
@@ -47,7 +46,7 @@ fi
 
 echo "=== Starting pybullet_robot_node ==="
 /usr/bin/python3 -u il_pipeline/il_pipeline/nodes/pybullet_robot_node.py \
-    --ros-args -p seed:=42 -p use_gui:="$PYBULLET_GUI" \
+    --ros-args -p seed:=42 -p gui:="$GUI_BOOL" \
     > /tmp/demo_pb.log 2>&1 &
 PB_PID=$!
 sleep 3

@@ -169,12 +169,21 @@ Expected results (with full GPU training):
 
 ## 7. Record demo video
 
-```bash
-# In one terminal: launch the full stack with PyBullet GUI on
-PYBULLET_GUI=1 bash scripts/run_demo_session.sh
+On WSL, PyBullet's GUI window requires a virtual framebuffer. `record_demo.sh` handles everything — Xvfb, Mesa software renderer, ffmpeg capture, and the demo session — in one command:
 
-# In another terminal: record the screen
-ffmpeg -video_size 1920x1080 -framerate 30 -f x11grab -i :0.0 \
+```bash
+# Install once if not already present
+sudo apt-get install -y xvfb ffmpeg
+
+# Record 5 rollouts with GUI to demo.mp4
+bash scripts/record_demo.sh
+```
+
+Alternatively, to record manually (native Linux with real X11):
+
+```bash
+PYBULLET_GUI=1 bash scripts/run_demo_session.sh &
+ffmpeg -video_size 1280x720 -framerate 30 -f x11grab -i :0.0 \
        -t 180 -c:v libx264 -pix_fmt yuv420p demo.mp4
 ```
 

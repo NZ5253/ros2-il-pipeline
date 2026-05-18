@@ -96,7 +96,7 @@ Full ACT training on the workstation GPU, same dataset as Experiment 2.
 - **Policy**: LeRobot ACT — 5.84 M parameters, transformer encoder/decoder with VAE prior
 - **Inputs**: STATE (14-D joint pos+vel) + ENV (7-D EE pose), split from the 21-D observation vector
 - **Chunk size**: 50 frames (1.67 s at 30 Hz)
-- **Training**: 2000 epochs, batch 32, AdamW lr=1e-4, KL weight 10, RTX 4060 GPU
+- **Training**: 500 epochs, batch 32, AdamW lr=1e-4, KL weight 10, RTX 4060 GPU
 
 ### Results
 
@@ -119,7 +119,7 @@ Reproduce with:
 ```bash
 python3 scripts/train.py --policy act \
     --dataset /path/to/dataset/panda_pickplace_v1 \
-    --output runs/panda_act --epochs 2000 --batch-size 32 \
+    --output runs/panda_act --epochs 500 --batch-size 32 \
     --chunk-size 50 --lr 1e-4 --device cuda:0
 EVAL_DEVICE=cuda:0 bash scripts/evaluate.sh runs/panda_act/best.pt act 20
 ```
