@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Tuple
 
 import torch
 import torch.nn as nn
@@ -26,7 +25,7 @@ def load_policy(
     checkpoint_path: Path,
     policy_type: str,
     device: torch.device,
-) -> Tuple[nn.Module, Normaliser]:
+) -> tuple[nn.Module, Normaliser]:
     """
     Dispatches by policy_type.
 
@@ -56,7 +55,7 @@ def _load_bc(ckpt: dict, cfg: dict, device: torch.device):
 
     state_dim = cfg.get("state_dim") or _state_dim_from_ckpt(ckpt)
     action_dim = cfg.get("action_dim") or _action_dim_from_ckpt(ckpt)
-    hidden = cfg.get("hidden", 256)
+    hidden = cfg.get("hidden") or _hidden_from_ckpt(ckpt)
     policy = BCPolicy(state_dim=state_dim, action_dim=action_dim, hidden=hidden).to(device)
     policy.load_state_dict(ckpt["state_dict"])
     policy.eval()
@@ -79,9 +78,9 @@ def _load_act(ckpt: dict, cfg: dict, device: torch.device):
     load weights, and wrap with predict_action_chunk that the inference node
     expects.
     """
+    from lerobot.configs.types import FeatureType, NormalizationMode, PolicyFeature
     from lerobot.policies.act.configuration_act import ACTConfig
     from lerobot.policies.act.modeling_act import ACTPolicy
-    from lerobot.configs.types import PolicyFeature, FeatureType, NormalizationMode
 
     state_dim = cfg["state_dim"]
     action_dim = cfg["action_dim"]
@@ -176,3 +175,10 @@ def _action_dim_from_ckpt(ckpt: dict) -> int:
     if last is None:
         raise ValueError("could not infer action_dim from checkpoint")
     return last.shape[0]
+
+
+def _hidden_from_ckpt(ckpt: dict) -> int:
+    for k, v in ckpt["state_dict"].items():
+        if "net.0.weight" in k:
+            return v.shape[0]
+    return 256

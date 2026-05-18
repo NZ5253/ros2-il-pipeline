@@ -1,20 +1,21 @@
 # Workstation Runbook
 
-Exact commands to reproduce the full deliverable on the university workstation. Designed so the workstation work is purely "more compute" — every script has been validated CPU-side on the dev box.
-
-**Goal:** under one workday of workstation time.
+Steps to reproduce the full pipeline. Validated on Windows 11 + WSL Ubuntu 22.04 + ROS 2 Humble + RTX 4060.
 
 ---
 
 ## 0. Prerequisites
 
-The workstation should have:
-
-- Ubuntu 22.04 or 24.04
-- ROS 2 (Humble or Jazzy — Jazzy preferred to match the dev box)
+- Ubuntu 22.04 (or WSL Ubuntu 22.04 on Windows)
+- ROS 2 Humble
 - Python 3.10+
-- A CUDA-capable GPU with recent driver
-- ~10 GB free disk space for the dataset, checkpoints, and lerobot models
+- CUDA-capable GPU
+- ~10 GB free disk space
+
+If starting from scratch on WSL:
+```bash
+bash scripts/setup_ros2_wsl.sh   # installs ROS 2, Python deps, builds both packages
+```
 
 ---
 
@@ -24,14 +25,12 @@ The workstation should have:
 git clone <repo-url> mybotshop_evaluation
 cd mybotshop_evaluation
 
-# Python deps (system or venv — match what the ROS 2 nodes will use)
 pip install -r requirements.txt
-pip install lerobot                         # ACT + Diffusion Policy
-pip install torch --index-url https://download.pytorch.org/whl/cu121   # CUDA torch
+pip install lerobot
+pip install torch --index-url https://download.pytorch.org/whl/cu128
 ```
 
-Verify the GPU is visible:
-
+Verify:
 ```bash
 python3 -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 ```
@@ -40,17 +39,17 @@ python3 -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device
 
 ## 2. Build the ROS 2 packages
 
-The repo contains two ROS 2 packages: `il_pipeline_msgs` (custom interfaces, ament_cmake) and `il_pipeline` (nodes + launch, ament_python).
-
 ```bash
-mkdir -p ros2_ws/src
-cp -r il_pipeline_msgs ros2_ws/src/
-cp -r il_pipeline      ros2_ws/src/
-cd ros2_ws
-source /opt/ros/jazzy/setup.bash
-colcon build --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3
+mkdir -p ~/il_ws/src
+ln -sfn $PWD/il_pipeline ~/il_ws/src/il_pipeline
+ln -sfn $PWD/il_pipeline_msgs ~/il_ws/src/il_pipeline_msgs
+cd ~/il_ws
+source /opt/ros/humble/setup.bash
+colcon build --packages-select il_pipeline_msgs
 source install/setup.bash
-cd ..
+colcon build --packages-select il_pipeline
+source install/setup.bash
+cd -
 ```
 
 Verify:

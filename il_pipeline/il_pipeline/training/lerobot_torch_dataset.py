@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pyarrow.parquet as pq
@@ -30,7 +29,8 @@ class LeRobotTorchDataset(Dataset):
         self,
         dataset_root: Path,
         chunk_size: int = 1,
-        stats_path: Optional[Path] = None,
+        stats_path: Path | None = None,
+        normalize: bool = True,
     ) -> None:
         self.root = Path(dataset_root)
         self.chunk_size = chunk_size
@@ -69,11 +69,12 @@ class LeRobotTorchDataset(Dataset):
             for f_idx in range(n_frames - self.chunk_size + 1):
                 self._index.append((ep_idx, f_idx))
 
-        # Optional normalisation
+        # Optional normalisation (disabled for ACT — ACT normalizes internally)
         self._stats = None
-        stats_path = stats_path or (self.root / "meta" / "stats.json")
-        if stats_path.exists():
-            self._stats = json.loads(stats_path.read_text())
+        if normalize:
+            stats_path = stats_path or (self.root / "meta" / "stats.json")
+            if stats_path.exists():
+                self._stats = json.loads(stats_path.read_text())
 
     def __len__(self) -> int:
         return len(self._index)

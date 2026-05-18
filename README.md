@@ -2,7 +2,7 @@
 
 A ROS 2-native imitation learning pipeline for manipulation, designed as a modular extension to the MyBotShop robotic webserver platform.
 
-**Status:** Working end-to-end. Full pipeline validated on a real ROS 2 stack with a simulated Franka Panda solving pick-and-place. ACT trained on CPU as proof-of-concept; full ACT training is the workstation step (see [WORKSTATION_RUNBOOK.md](WORKSTATION_RUNBOOK.md)).
+**Status:** Working end-to-end on Windows 11 (WSL Ubuntu 22.04 + ROS 2 Humble + RTX 4060). All three nodes verified live, 23/23 unit tests passing, BC + ACT both train and deploy through the inference node. Real demonstration collection and GPU training in progress.
 
 ---
 
@@ -19,17 +19,16 @@ Optional extension: PPO-based RL fine-tuning of the IL policy.
 
 The pipeline integrates with the MyBotShop platform through ROS 2 service and topic contracts only — no platform-internal code is modified. A `pybullet_robot_node` stand-in is included so the pipeline can be developed and validated without the actual platform installed.
 
-## Verified End-to-End (this dev box, CPU)
+## Verified End-to-End
 
-| Step | Result |
-|---|---|
-| 40 pick-and-place demonstrations via HTTP → ROS → parquet | 40 / 40 success |
-| BC training (200 epochs, 22K frames) | 4 min, val loss 0.0099 |
-| BC closed-loop rollouts | 1 / 10 (baseline for the multi-phase task) |
-| ACT training (LeRobot 0.5.x, 5.8M params, CPU) | trains end-to-end |
-| ACT checkpoint loads through inference_node | ✓ |
-| FastAPI REST + WebSocket layer dispatches typed ROS services | ✓ |
-| 23 unit tests | passing |
+| Step | Machine | Result |
+|---|---|---|
+| Synthetic pipeline check (30 eps, BC, 200 epochs) | Windows / RTX 4060 | val loss 0.192, MAE 0.124, p50 latency 0.08 ms |
+| 3-node live pipeline (pybullet + data_logger + inference) | WSL / ROS 2 Humble | 30 Hz sustained, all topics verified |
+| FastAPI health + dataset + policy endpoints | Windows (dry-run) | all return correct JSON |
+| BC + ACT checkpoints load through inference_node | WSL | ✓ |
+| 23 unit tests | Windows | passing |
+| 50-ep real demo collection + GPU training | in progress | — |
 
 ---
 
@@ -80,7 +79,7 @@ If you want the high-level concept, read in this order:
 3. [`docs/04_dataset_schema.md`](docs/04_dataset_schema.md) — dataset format
 4. [`docs/03_api_specification.md`](docs/03_api_specification.md) — web API
 
-If you want to read code: start at the ROS 2 nodes in [`src/il_pipeline/nodes/`](src/il_pipeline/nodes/), then the FastAPI service in [`src/web_api/app.py`](src/web_api/app.py).
+If you want to read code: start at the ROS 2 nodes in [`il_pipeline/il_pipeline/nodes/`](il_pipeline/il_pipeline/nodes/), then the FastAPI service in [`il_pipeline/il_pipeline/web_api/app.py`](il_pipeline/il_pipeline/web_api/app.py).
 
 ---
 
@@ -116,11 +115,14 @@ pip install lerobot
 ### Build the ROS 2 packages
 
 ```bash
-mkdir -p ros2_ws/src
-cp -r il_pipeline il_pipeline_msgs ros2_ws/src/
-cd ros2_ws
-source /opt/ros/jazzy/setup.bash
-colcon build --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3
+mkdir -p ~/il_ws/src
+ln -sfn $PWD/il_pipeline ~/il_ws/src/il_pipeline
+ln -sfn $PWD/il_pipeline_msgs ~/il_ws/src/il_pipeline_msgs
+cd ~/il_ws
+source /opt/ros/humble/setup.bash
+colcon build --packages-select il_pipeline_msgs
+source install/setup.bash
+colcon build --packages-select il_pipeline
 source install/setup.bash
 ```
 
@@ -137,7 +139,7 @@ ros2 run il_pipeline inference_node
 python3 -m uvicorn il_pipeline.web_api.app:app --host 0.0.0.0 --port 8011
 ```
 
-OpenAPI docs are available at `http://localhost:8000/api/v1/docs`.
+OpenAPI docs at `http://localhost:8011/docs`.
 
 ---
 
@@ -212,11 +214,12 @@ Results, including negative findings, are documented in `docs/05_evaluation_resu
 - ✅ Dataset writer, frame validator, LeRobot parquet round-trip
 - ✅ Training pipeline (BC and ACT both)
 - ✅ FastAPI web layer with live ROS bridge
-- ✅ 40-episode pick-and-place dataset collected (100 % expert success)
-- ✅ BC trained and evaluated end-to-end
-- ✅ ACT (LeRobot 0.5.x) trains and loads through inference node
-- 🟡 Full ACT training (workstation GPU, see WORKSTATION_RUNBOOK.md)
-- 🟡 Final evaluation rollouts on workstation-trained ACT
+- ✅ Synthetic end-to-end validated (data → train → eval, GPU)
+- ✅ Live ROS 2 pipeline verified (3 nodes, 30 Hz)
+- ✅ BC and ACT train and load through inference_node
+- 🟡 50-episode real demo collection (running)
+- 🟡 GPU training on real demos (BC + ACT)
+- 🟡 Closed-loop evaluation rollouts
 - 🟡 Demo video
 
 ---

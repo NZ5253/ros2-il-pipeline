@@ -14,25 +14,25 @@ Execution modes for ACT:
 
 from __future__ import annotations
 
+import contextlib
 import time
 from collections import deque
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import rclpy
 import torch
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-
-from sensor_msgs.msg import JointState, Image
 from geometry_msgs.msg import PoseStamped, Twist
+from rclpy.node import Node
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import Image, JointState
 from std_srvs.srv import Trigger
-from il_pipeline_msgs.srv import LoadPolicy
+
+from il_pipeline.inference.normaliser import Normaliser
 
 # Project-local
 from il_pipeline.inference.policy_loader import load_policy
-from il_pipeline.inference.normaliser import Normaliser
+from il_pipeline_msgs.srv import LoadPolicy
 
 
 class InferenceNode(Node):
@@ -54,7 +54,7 @@ class InferenceNode(Node):
         self.declare_parameter("device", "cuda:0")
 
         self._policy = None
-        self._normaliser: Optional[Normaliser] = None
+        self._normaliser: Normaliser | None = None
         self._device = torch.device(
             self.get_parameter("device").get_parameter_value().string_value
         )
@@ -67,9 +67,9 @@ class InferenceNode(Node):
         self._running = False
 
         # Latest sensor values
-        self._latest_joint_state: Optional[JointState] = None
-        self._latest_pose: Optional[PoseStamped] = None
-        self._latest_image: Optional[Image] = None
+        self._latest_joint_state: JointState | None = None
+        self._latest_pose: PoseStamped | None = None
+        self._latest_image: Image | None = None
 
         # Action chunk buffer for ACT temporal ensembling
         self._chunk_buffer: deque[tuple[int, np.ndarray]] = deque(maxlen=50)
@@ -167,7 +167,7 @@ class InferenceNode(Node):
             self.get_logger().warn(f"inference latency {latency_ms:.1f}ms > 50ms")
         self._step_index += 1
 
-    def _build_observation(self) -> Optional[dict]:
+    def _build_observation(self) -> dict | None:
         js = self._latest_joint_state
         pose = self._latest_pose
         if js is None:
@@ -300,7 +300,7 @@ class InferenceNode(Node):
         return response
 
 
-def main(args: Optional[list[str]] = None) -> None:
+def main(args: list[str] | None = None) -> None:
     rclpy.init(args=args)
     node = InferenceNode()
     try:
@@ -308,14 +308,10 @@ def main(args: Optional[list[str]] = None) -> None:
     except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
         pass
     finally:
-        try:
+        with contextlib.suppress(Exception):
             node.destroy_node()
-        except Exception:  # noqa: BLE001
-            pass
-        try:
+        with contextlib.suppress(Exception):
             rclpy.shutdown()
-        except Exception:  # noqa: BLE001
-            pass
 
 
 if __name__ == "__main__":

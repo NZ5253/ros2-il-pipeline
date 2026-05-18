@@ -30,20 +30,18 @@ change because the topic + service contracts stay the same.
 
 from __future__ import annotations
 
+import contextlib
 import random
-import time
 
 import pybullet as p
 import pybullet_data
 import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-
-from sensor_msgs.msg import JointState
 from geometry_msgs.msg import PoseStamped, Twist
+from rclpy.node import Node
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool
 from std_srvs.srv import Trigger
-
 
 # Franka Panda has 12 joints in the URDF, of which the first 7 are the
 # revolute arm joints. 9 and 10 are gripper fingers (prismatic).
@@ -104,7 +102,7 @@ class PyBulletRobotNode(Node):
         self._robot = p.loadURDF(urdf_path, useFixedBase=True)
 
         # Initialise the robot at home
-        for idx, q in zip(ARM_JOINT_INDICES, HOME_Q):
+        for idx, q in zip(ARM_JOINT_INDICES, HOME_Q, strict=False):
             p.resetJointState(self._robot, idx, q)
         self._target_q = list(HOME_Q)
         self._gripper_target = 0.04 if self.get_parameter("gripper_open").value else 0.0
@@ -225,7 +223,7 @@ class PyBulletRobotNode(Node):
             self._maybe_attach_grasp()
 
     def _handle_reset(self, request, response):
-        for idx, q in zip(ARM_JOINT_INDICES, HOME_Q):
+        for idx, q in zip(ARM_JOINT_INDICES, HOME_Q, strict=False):
             p.resetJointState(self._robot, idx, q)
         self._target_q = list(HOME_Q)
         self._gripper_target = 0.04
@@ -345,10 +343,8 @@ class PyBulletRobotNode(Node):
         self._pub_status.publish(status)
 
     def destroy_node(self) -> bool:
-        try:
+        with contextlib.suppress(Exception):
             p.disconnect(self._pb)
-        except Exception:  # noqa: BLE001
-            pass
         return super().destroy_node()
 
 
@@ -360,14 +356,10 @@ def main(args=None) -> None:
     except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
         pass
     finally:
-        try:
+        with contextlib.suppress(Exception):
             node.destroy_node()
-        except Exception:  # noqa: BLE001
-            pass
-        try:
+        with contextlib.suppress(Exception):
             rclpy.shutdown()
-        except Exception:  # noqa: BLE001
-            pass
 
 
 if __name__ == "__main__":

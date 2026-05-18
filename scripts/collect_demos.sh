@@ -26,8 +26,8 @@ DATASET_ROOT="${DATASET_ROOT:-/tmp/mybotshop_demos}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-source /opt/ros/jazzy/setup.bash > /dev/null
-source /tmp/mybotshop_ws/install/setup.bash > /dev/null
+source /opt/ros/humble/setup.bash > /dev/null
+source /root/il_ws/install/setup.bash > /dev/null
 export PYTHONPATH="$PYTHONPATH:$REPO_ROOT/il_pipeline"
 
 rm -rf "${DATASET_ROOT:?}/${DATASET_NAME:?}"
@@ -86,7 +86,7 @@ for i in $(seq 1 "$N_EPISODES"); do
         > /dev/null
 
     # Run scripted expert (blocking; ends when phase machine completes ~16 s)
-    timeout 18 /usr/bin/python3 -u scripts/scripted_pickplace.py > /tmp/collect_expert.log 2>&1
+    timeout --kill-after=2 20 /usr/bin/python3 -u scripts/scripted_pickplace.py > /tmp/collect_expert.log 2>&1
 
     # Read task_status for a short window: success if ANY True was observed
     # between expert finish and now. This avoids stale cached False values.

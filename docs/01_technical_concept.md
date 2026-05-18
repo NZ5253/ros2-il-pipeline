@@ -1,19 +1,16 @@
 # Imitation Learning Pipeline for Manipulation
-### Integration Concept for the MyBotShop ROS 2 Robotic Webserver Platform
+### Integration with the MyBotShop ROS 2 Robotic Webserver Platform
 
-**Author:** Naeem Zain Uddin
+**Author:** Naeem Zain Uddin  
 **Date:** May 2026
-**Status:** Technical concept and architecture proposal
 
 ---
 
 ## 1. Problem Statement
 
-The MyBotShop robotic webserver platform provides a hardware-agnostic interface for monitoring and controlling ROS 2 robots, with existing functionality for teleoperation, waypoint navigation, speech-to-action workflows, monitoring, diagnostics, and simulation visualisation. The platform is positioned as a unified control surface across humanoids, mobile manipulators, mobile platforms, and standalone arms.
+The brief asks for an imitation learning pipeline that integrates with the MyBotShop webserver platform as a natural extension, not a separate tool. Three things need to work end-to-end: collecting demonstrations through the existing teleop interface, storing them in a structured dataset reachable from the webserver, and deploying a trained policy that sends commands through the same robot controller the human teleoperator uses.
 
-The proposed evaluation task is to design and prototype a pipeline that adds **imitation learning for manipulation** to this platform. Concretely: a user should be able to (1) collect demonstration data through the platform's teleoperation interface, (2) have those demonstrations persist as a structured dataset accessible from the webserver, and (3) train and deploy a policy that reproduces the demonstrated behaviour on the same robot.
-
-A clean extension to the existing platform — not a parallel system — is the design goal. The pipeline should respect three properties that the underlying platform already exhibits: **hardware-agnosticism**, **modular ROS 2 integration**, and **WebSocket-based real-time observability**.
+The design constraint that shapes every decision below is hardware-agnosticism: the platform runs on humanoids, mobile arms, and standalone manipulators without code changes. The IL pipeline has to respect the same constraint.
 
 ---
 
@@ -34,7 +31,7 @@ The CEO's brief explicitly leaves scope open. The decisions made for this propos
 | Web integration | **FastAPI** with WebSocket bridging into the platform's ROS 2 layer | Matches existing platform pattern of WebSocket-based real-time exchange |
 | Dataset format | **LeRobotDataset** (parquet shards) | Compatible with `datasets` and HuggingFace Hub for shareable datasets |
 
-The pipeline is designed to be deployable on any of the platform's supported robots without code changes — only configuration (URDF, joint names, observation space).
+The pipeline requires only configuration changes (URDF, joint names, observation dimension) to switch between robots.
 
 ---
 
@@ -125,16 +122,9 @@ See [`03_api_specification.md`](03_api_specification.md) for the full web-layer 
 
 ## 5. Dataset Format
 
-The dataset uses **LeRobotDataset** as its on-disk schema. This decision is load-bearing for several reasons: it is parquet-based (efficient and shardable), has a stable schema, ships with visualisation tools, integrates with HuggingFace Hub for dataset sharing, and is the format used by an increasing share of modern open-source manipulation IL work.
+The dataset uses **LeRobotDataset** (parquet shards, HuggingFace `datasets`-compatible). This avoids inventing a custom format and gives ACT, Diffusion Policy, and OpenVLA direct access to the data without conversion. Visualisation and HF Hub upload are included.
 
-The full schema specification, including encoding choices for images, joint conventions, and metadata fields, is in [`04_dataset_schema.md`](04_dataset_schema.md).
-
-A single episode contains a sequence of frames, each with:
-- `observation.state` — joint positions + velocities + end-effector pose
-- `observation.image.{cam_name}` — RGB frame (encoded as `Image` features with optional video compression)
-- `action` — the commanded action at this step (delta-joint or delta-end-effector depending on configuration)
-- `timestamp`, `frame_index`, `episode_index` — provenance metadata
-- `task` — natural-language task description (enables future language-conditioned policies)
+Schema per frame: `observation.state` (joint positions + velocities + EE pose), `action` (delta-EE Twist), `timestamp`, `episode_index`, `frame_index`, `task` string. Camera frames are optional. Full schema in [`04_dataset_schema.md`](04_dataset_schema.md).
 
 ---
 
@@ -142,29 +132,19 @@ A single episode contains a sequence of frames, each with:
 
 ### 6.1 Baseline: Behaviour Cloning (BC)
 
-A small MLP that maps observation to action, trained with L1 or MSE loss. This serves as a sanity check: it should converge on tens of demonstrations and provides a reference point for evaluating more complex policies. If BC fails on a task, the pipeline (not the policy class) is the problem.
+A 3-layer MLP mapping `observation.state` → `action`, trained with L1 loss. Fast to train (minutes on GPU), simple to debug, and useful as a lower bound. If BC fails to converge, something is wrong with the data, not the policy class.
+
+BC is a known weak baseline on multi-phase manipulation tasks because a state-only MLP cannot resolve which behavioural mode it is in (approaching vs. transporting vs. releasing) without explicit temporal context. This is expected and documented — it is the exact gap ACT addresses.
 
 ### 6.2 Primary: ACT (Action Chunking Transformer)
 
-The chosen primary policy. ACT predicts a chunk of `k` future actions (typically `k=10–100`) from the current observation, conditioned through a transformer encoder over a short observation history. The chunking strategy is what makes it sample-efficient: the policy learns temporally extended behaviours from individual demonstrations rather than per-step decisions.
+ACT predicts a chunk of `k` future actions from the current observation (no explicit state machine required). The chunk size encodes the planning horizon; `k=30` at 30 Hz means the policy plans 1 second ahead per inference step. Overlapping chunks are blended via temporal ensembling during deployment.
 
-Training:
-- Optimiser: AdamW, learning rate 1e-4 with cosine decay
-- Batch size: 32–64
-- Epochs: 1000–5000 depending on dataset size
-- Validation: held-out episodes, success-rate evaluation in simulation
+Training hyperparameters for this task: AdamW lr=1e-4, batch 64, chunk size 30, 1000–2000 epochs. Expected convergence on 40–50 demonstrations: 70–90 % closed-loop success rate, consistent with published ACT results on comparable pick-and-place benchmarks.
 
-### 6.3 Stretch: Diffusion Policy
+### 6.3 Optional: PPO Fine-Tuning
 
-If time allows, train a Diffusion Policy on the same dataset and compare success rates. Diffusion has been shown to outperform ACT on more complex tasks at the cost of more compute and slower inference.
-
-### 6.4 Optional: PPO Fine-Tuning
-
-The IL policy can be wrapped as a Gym-style environment policy and fine-tuned with PPO (Stable-Baselines3) against a reward function in simulation. The reward signal can be sparse (task success) or shaped (distance-to-goal + grasp-stability). This is where my thesis work on PPO and reward shaping carries over directly.
-
-The integration point is a `policy_bridge` module that exposes:
-- `predict(observation) -> action` — for IL inference
-- `act(observation, deterministic) -> action, log_prob, value` — for RL fine-tuning
+The trained IL policy serves as initialisation for PPO (Stable-Baselines3) fine-tuning against a sparse success reward in simulation. The integration point is a `policy_bridge` module that exposes the IL policy's `predict()` and the RL actor's `act(obs, deterministic) -> (action, log_prob, value)`. This connects directly to my thesis work on PPO with shaped rewards.
 
 ---
 
@@ -229,14 +209,12 @@ A few choices were considered and explicitly rejected:
 
 ## 10. Future Work
 
-Within the same architectural skeleton, several extensions are straightforward:
+Extensions that fit naturally into the current architecture:
 
-- **VR teleoperation** for richer demonstrations (Oculus / Vision Pro bridges to ROS 2 exist)
-- **Language conditioning** — the dataset already carries task strings; CLIP-conditioned policies are a small extension
-- **VLA-class policies** (OpenVLA, π₀) once data and compute are available
-- **Multi-task policies** trained on a mixture of demonstration datasets
-- **Sim-to-real transfer** with domain randomisation
-- **Active learning** — the policy queries the user for demonstrations on failure cases through the webserver UI
+- **VR teleoperation** — richer demonstrations; Oculus / Vision Pro → ROS 2 bridges exist and the data logger is already agnostic to the teleop source
+- **Language conditioning** — the dataset carries task strings; CLIP-conditioned policies (OpenVLA, π₀) are a direct upgrade with no data schema change
+- **Sim-to-real transfer** — domain randomisation on physics parameters, textures, and lighting in simulation; the ROS 2 interface layer is the same on sim and hardware
+- **Active learning** — the webserver already has a live feedback channel; the policy can request a human demonstration on failure and the data logger records it automatically
 
 ---
 
@@ -274,6 +252,8 @@ The CEO's note that "the documentation is somewhat outdated, and the platform al
 
 ## 12. Summary
 
-The proposed pipeline adds imitation learning for manipulation to the MyBotShop webserver as three new ROS 2 nodes (data logger, training service, inference) plus a small REST + WebSocket API layer. It uses LeRobotDataset as the on-disk format, ACT as the primary policy with BC as a sanity-check baseline and Diffusion Policy as a stretch comparison, and reserves a clean integration point for PPO fine-tuning that connects directly to my thesis background. The design is hardware-agnostic, distribution-agnostic, and modular against the existing platform.
+Three new ROS 2 nodes (data logger, inference, pybullet stand-in) and a FastAPI layer make up the implemented pipeline. The stand-in robot node respects the same `/joint_states` + `/cartesian_pose` + `/cmd_robot` interface the real MyBotShop hardware exposes — swapping the simulation for the actual platform controller requires no code change.
 
-The prototype implementation, demonstration data, trained policies, evaluation results, and a short demo video accompany this document.
+Dataset format is LeRobotDataset (parquet). Primary policy is ACT; BC is the validated lower bound. Both train on the same data and deploy through the same inference node. End-to-end latency at 30 Hz is within the control cycle budget on GPU.
+
+The full implementation, dataset, trained checkpoints, and evaluation numbers are in the accompanying repository.

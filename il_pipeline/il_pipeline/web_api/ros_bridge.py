@@ -16,10 +16,10 @@ import asyncio
 import json
 import threading
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncIterator, Optional
 
 
 @dataclass
@@ -41,7 +41,7 @@ class RosBridge:
     and returns stub responses so the FastAPI app can still start.
     """
 
-    def __init__(self, dry_run: Optional[bool] = None) -> None:
+    def __init__(self, dry_run: bool | None = None) -> None:
         self._stop_event = threading.Event()
         self._executor = None
         self._node = None

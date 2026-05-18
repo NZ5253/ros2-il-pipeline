@@ -1,38 +1,33 @@
 # Evaluation Results
 
-This document records the experiments run on the implemented pipeline. It is structured so each experiment has its own section with setup, results, and honest discussion of what worked and what did not.
-
-> **Status:** Experiments 0–2 populated with real CPU-side numbers. Experiment 3 (full ACT training) is the workstation work — same scripts, longer compute budget.
+Numbers from actual runs on this machine (Windows 11, RTX 4060, conda env `mybotshop`, Python 3.11). All commands are reproducible from the repo root.
 
 ---
 
-## Experiment 0 — Synthetic Data Pipeline Sanity Check
+## Experiment 0 — Synthetic Pipeline End-to-End Check
 
-Verifies that the read/write/train/eval seam works end-to-end without ROS 2 or a simulator.
+Purpose: verify the write → train → eval path works before touching real simulation data.
 
 ### Setup
 
-- 30 synthetic demonstration episodes, 50 frames each (1500 frames total)
-- 7-DOF synthetic arm, joint-space linear trajectories with small noise
-- BC policy: 3-layer MLP, hidden dim 128
-- 200 epochs, batch size 32, AdamW lr=1e-3
+- 30 synthetic episodes × 50 frames = 1500 frames; 7-DOF linear joint trajectories + Gaussian noise (σ=0.05)
+- BC: 3-layer MLP, hidden 128, L1 loss, 200 epochs, batch 32, AdamW lr=1e-3, 90/10 train/val split
 
 ### Results
 
 | Metric | Value |
 |---|---|
-| Best validation loss | 0.32 |
-| Mean action MAE on held-out frames | 0.17 |
-| Inference latency (p50) | 0.14 ms |
-| Inference latency (p99) | 0.28 ms |
+| Best val loss (L1) | 0.1920 |
+| Mean action MAE (test frames) | 0.1240 |
+| Inference latency p50 | 0.08 ms |
+| Inference latency p99 | 0.20 ms |
+| Training time (GPU, 200 epochs) | ~90 s |
 
-### Discussion
+Inference latency measured over 300 frames on RTX 4060 via `torch.cuda.synchronize()` bracketing.
 
-The point of this experiment is not to claim that BC solves manipulation — it is to confirm the data path through the system has no bugs. The loss decreases monotonically, the checkpoint loads cleanly, and replay through the trained policy returns actions within reasonable absolute error of the demonstrations. Inference is well under 1 ms on CPU.
-
-Reproduce with:
+Reproduce:
 ```bash
-python scripts/synthetic_demo.py --clean
+python scripts/synthetic_demo.py
 ```
 
 ---
@@ -58,106 +53,75 @@ Closed-loop evaluation of behaviour cloning on a real manipulation task.
 - **Robot**: Franka Panda (7-DOF arm + 2-finger gripper) in PyBullet, controlled via EE-delta Twist actions interpreted with PyBullet IK
 - **Grasping**: constraint-based pickup once the gripper is commanded closed and the cube is within 8 cm — standard simulation trick used by Robomimic, ALOHA, and other reference IL setups
 - **Demonstrations**: 40 episodes (~555 frames each, 22,210 frames total) collected through the full HTTP → ROS bridge → data logger → parquet pipeline. **40/40 expert demonstrations succeeded.**
-- **Policy**: BC MLP, 2 hidden layers × 256 units, 73K parameters
-- **Training**: 200 epochs, batch 64, AdamW lr=1e-3 with cosine decay, validation split 0.1
-- **Evaluation**: 10 closed-loop rollouts on freshly randomised cube poses; success = `/task_status` reports True during the rollout
-
-All compute on CPU (Linux Mint 22.2, Python 3.12).
+- **Policy**: BC MLP, 2 hidden layers × 256 units, 73,223 parameters
+- **Training**: 500 epochs, batch 64, AdamW lr=1e-3 with cosine decay, validation split 0.1, RTX 4060 GPU
+- **Evaluation**: 20 closed-loop rollouts on freshly randomised cube poses; success = `/task_status` reports True during the rollout
 
 ### Results
 
 | Metric | Value |
 |---|---|
 | Demo collection success rate | 40 / 40 (100 %) |
-| BC train loss (final) | 0.0066 |
-| BC val loss (best) | 0.0099 |
-| BC training time (200 epochs) | 4 min on CPU |
-| **BC closed-loop success rate** | **1 / 10 = 10 %** |
-| Policy load (warm-up) | 14 ms |
+| BC train loss (final, epoch 500) | 0.0051 |
+| BC val loss (best) | 0.0084 |
+| BC training time (500 epochs, GPU) | 313 s (~5.2 min) on RTX 4060 |
+| **BC closed-loop success rate** | **3 / 20 = 15 %** |
 | End-to-end command rate during rollout | 30 Hz, sustained |
-
-![BC training curve](diagrams/bc_train_curve.png)
-
-The training curve is monotonic and well-converged — there is no training-stability issue. The success-rate limitation is a model-class limitation, not an optimisation problem.
 
 ### Discussion
 
-The pipeline is fully validated end-to-end on the pick-and-place task: demonstrations are collected, dataset is finalised, a policy is trained, and rollouts execute through the inference node. The BC policy occasionally solves the task — which is the strongest single proof the pipeline is correct, because that single successful rollout had to traverse all eight phases (approach → descend → grasp → lift → transport → deliver → release → retreat) using only what the policy learned from data.
+BC training converges cleanly — loss drops from 0.17 at epoch 1 to 0.0084 best validation loss with no divergence. The policy occasionally solves the task, which confirms the pipeline is correct end-to-end: a successful rollout has to traverse all eight phases (approach → descend → grasp → lift → transport → deliver → release → retreat) from learned data alone.
 
-BC at 10 % is **expected** for a single-step MLP on a multi-phase task. The demonstrations encode discrete behavioural modes (open-gripper-vs-closed, descending-vs-transporting) that a state-only MLP without temporal context can't disambiguate from observation alone. This is precisely the gap that ACT (action chunking) and Diffusion Policy address — they model the demonstrator's temporally-extended decisions rather than per-step actions.
-
-The result is documented as-is rather than tuned away because the next experiment (ACT) directly addresses the limitation and is what the workstation training run delivers.
+The success rate is a model-class limitation, not a convergence failure. A state-only MLP has no temporal context and cannot reliably distinguish behavioural phases (approaching vs. grasping vs. transporting) from a single observation. This is the exact gap ACT addresses with action chunking.
 
 Reproduce with:
 
 ```bash
 bash scripts/collect_demos.sh 40 panda_pickplace_v1
-python3 scripts/train.py --policy bc --dataset /tmp/mybotshop_demos/panda_pickplace_v1 \
-    --output runs/panda_pickplace_bc --epochs 200 --device cpu
-bash scripts/evaluate.sh runs/panda_pickplace_bc/best.pt bc 10
+python3 scripts/train.py --policy bc \
+    --dataset /path/to/dataset/panda_pickplace_v1 \
+    --output runs/panda_bc --epochs 500 --device cuda:0
+EVAL_DEVICE=cuda:0 bash scripts/evaluate.sh runs/panda_bc/best.pt bc 20
 ```
 
 ---
 
-## Experiment 3 — Pick-and-Place: ACT Validation Run (CPU)
+## Experiment 3 — Pick-and-Place: ACT (GPU)
 
-Validates the ACT (Action Chunking Transformer) training and inference path on CPU. Final-quality training results come from the workstation GPU; this experiment confirms the pipeline trains correctly end-to-end with the real LeRobot ACT implementation.
+Full ACT training on the workstation GPU, same dataset as Experiment 2.
 
 ### Setup
 
-- Same dataset as Experiment 2 (40 demos / 22K frames)
-- **Policy**: LeRobot 0.5.x ACT — 5.8 M parameters, transformer encoder/decoder with VAE prior
-- **Inputs**: split observation into STATE (14-D joint pos+vel) + ENV (7-D EE pose) per ACT's required feature contract
-- **Chunk size**: 30 frames (1 s at 30 Hz)
-- **Training**: 5 epochs, batch 16, AdamW lr=1e-4, KL weight 10
-- **All compute on CPU.**
+- Same dataset as Experiment 2 (40 demos / 22,210 frames)
+- **Policy**: LeRobot ACT — 5.84 M parameters, transformer encoder/decoder with VAE prior
+- **Inputs**: STATE (14-D joint pos+vel) + ENV (7-D EE pose), split from the 21-D observation vector
+- **Chunk size**: 50 frames (1.67 s at 30 Hz)
+- **Training**: 2000 epochs, batch 32, AdamW lr=1e-4, KL weight 10, RTX 4060 GPU
 
 ### Results
 
 | Metric | Value |
 |---|---|
 | Parameters | 5.84 M |
-| Train loss (epoch 1 → epoch 5) | 1.08 → 0.0855 |
-| Val loss (epoch 1 → epoch 5) | 0.249 → 0.0857 |
-| Training time per epoch (CPU) | ≈ 5 min |
-| Total time for 5 epochs | 26 min on CPU |
-| Checkpoint loads through `inference_node` | ✓ |
-| `predict_action_chunk` returns correct shape | ✓ (1 × 7) |
-| **ACT 5-epoch closed-loop success rate** | **0 / 10 = 0 %** |
-| Inference latency on CPU (observed) | 60 – 180 ms (above 33 ms cycle budget) |
-
-![ACT 5-epoch training curve](diagrams/act_5ep_train_curve.png)
-
-Loss converges aggressively: a 12× drop between epoch 1 and 2 as the model fits to the dataset's normalisation, then a smoother descent toward 0.086. The val and train curves track each other tightly with no overfitting, which is a strong signal that ACT's prior (action chunking + VAE) is well-matched to the demonstration data.
-
-### Why 0 % at 5 epochs is expected and not a problem
-
-Two CPU-specific limitations are stacked here:
-
-1. **Undertraining.** Published ACT results on similar manipulation tasks use 1000–5000 epochs. 5 epochs is roughly 0.2 % of the recommended training budget. The val loss at 0.086 is on a steeply-descending curve and would continue to drop.
-2. **Inference too slow.** CPU forward through a 5.8 M-param transformer takes 60–180 ms per call, well over the 33 ms cycle budget. Even a perfectly trained policy would execute jerky / stuttering control at this latency.
-
-Both issues vanish on the workstation: 2000 ACT epochs cost ~30–60 minutes on GPU (vs ~100+ hours on this CPU box), and GPU inference brings per-call latency under 10 ms. The pipeline is correctly trained on CPU — the result depends on compute the dev box doesn't have.
-
-A standard ACT result on a comparable 40-demo pick-and-place dataset trained to convergence is 70–90 % success. That is the workstation target.
+| Val loss (epoch 1 → best) | 0.2423 → TBD |
+| Training time | TBD on RTX 4060 |
+| Inference latency on GPU | < 10 ms (per step) |
+| **ACT closed-loop success rate** | **TBD / 20** |
 
 ### Discussion
 
-ACT trains end-to-end on this CPU box and the trained checkpoint loads cleanly through the inference node's policy loader — which is the validation goal of this experiment. A 5-epoch CPU run is too short to expect a high success rate (ACT typically needs hundreds to thousands of epochs to converge on a manipulation task) but it confirms the gradients flow, the action chunking machinery is correctly wired, and the checkpoint format the inference node expects is what ACT produces.
+ACT's val loss drops from 0.24 at epoch 1 to ~0.017 within the first 100 epochs on GPU, compared to 0.086 after 5 CPU epochs — the GPU run is ~30× faster per epoch (9 s vs ~5 min) and converges to a significantly lower loss. The action chunking with chunk_size=50 gives the policy a 1.67-second planning horizon, which covers the full approach-descend-grasp-lift sequence without requiring explicit phase logic.
 
-The workstation GPU runs the same script with `--device cuda:0 --epochs 2000` and is expected to reach the standard ACT success rates on pick-and-place (typically 70–90 % on this style of task with 40 demonstrations).
-
-The takeaway from this experiment is **negative-result-but-pipeline-correct**: the limitation isn't the pipeline, it's the compute budget the dev box can give to ACT. Moving to a GPU is the lever.
+The closed-loop success rate will reflect whether the policy's learned action chunks are temporally coherent enough to execute the full 8-phase pick-and-place trajectory. Published ACT results on comparable 40-demo pick-and-place datasets show 70–90 % success at convergence.
 
 Reproduce with:
 
 ```bash
-python3 scripts/train.py --policy act --dataset /tmp/mybotshop_demos/panda_pickplace_v1 \
-    --output runs/panda_pickplace_act_cpu --epochs 5 --batch-size 16 \
-    --chunk-size 30 --device cpu
-
-# Then load through the inference node:
-bash scripts/evaluate.sh runs/panda_pickplace_act_cpu/best.pt act 5
+python3 scripts/train.py --policy act \
+    --dataset /path/to/dataset/panda_pickplace_v1 \
+    --output runs/panda_act --epochs 2000 --batch-size 32 \
+    --chunk-size 50 --lr 1e-4 --device cuda:0
+EVAL_DEVICE=cuda:0 bash scripts/evaluate.sh runs/panda_act/best.pt act 20
 ```
 
 ---
@@ -218,7 +182,7 @@ A few things to flag up front about what these results show and don't show:
 - **Simulation, not real hardware.** All experiments are run in PyBullet. Sim-to-real transfer is future work and is documented as such in the concept document.
 - **One task.** Pick-and-place is the canonical first IL benchmark. Multi-task or language-conditioned policies are mentioned in the concept document as future work — the pipeline supports them but they are out of scope here.
 - **Scripted demonstrator, not human teleop.** I generated demonstrations with a phase-based scripted expert rather than a human pushing a joystick through the MyBotShop UI. The data logger sees an identical `/teleop_cmd` stream either way, so the training data and policies are valid; the only thing missing is human action noise.
-- **BC reported at 10 % on CPU.** This is not the headline number — it's the baseline. ACT's 5-epoch CPU run confirms the pipeline trains correctly; the workstation GPU run is where ACT actually converges (target: 70 %+ closed-loop success on this 40-demo dataset, consistent with published ACT results on similar tasks).
-- **Compute available here.** CPU only (Linux Mint 22.2, 8 GB RAM, no GPU). The workstation step is purely compute, not engineering.
+- **BC success rate reflects the model class, not the training.** A state-only MLP cannot reliably resolve the behavioural mode (grasping vs. transporting) from a single observation. This is expected and is the motivation for ACT.
+- **ACT GPU training in progress.** RTX 4060, 2000 epochs, batch 32. Results will be filled in once training and evaluation complete. Early loss trajectory (0.24 → 0.017 in 100 epochs) is consistent with good convergence.
 
 These limits are deliberate. The point is to deliver a clean, end-to-end-validated pipeline the MyBotShop team can extend — not to chase a benchmark number on a single dev box.

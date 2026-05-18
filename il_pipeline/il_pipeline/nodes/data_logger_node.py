@@ -12,22 +12,21 @@ webserver UI can start and stop recordings.
 
 from __future__ import annotations
 
+import contextlib
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-
-from sensor_msgs.msg import JointState, Image
 from geometry_msgs.msg import PoseStamped, Twist
-from il_pipeline_msgs.srv import StartEpisode, StopEpisode
+from rclpy.node import Node
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import Image, JointState
 
-from il_pipeline.dataset.lerobot_writer import LeRobotShardWriter
 from il_pipeline.dataset.frame_validator import FrameValidator
+from il_pipeline.dataset.lerobot_writer import LeRobotShardWriter
+from il_pipeline_msgs.srv import StartEpisode, StopEpisode
 
 
 @dataclass
@@ -93,13 +92,13 @@ class DataLoggerNode(Node):
         )
 
         # Latest values, sampled at action publication rate to form a frame
-        self._latest_joint_state: Optional[JointState] = None
-        self._latest_pose: Optional[PoseStamped] = None
-        self._latest_image: Optional[Image] = None
-        self._latest_action: Optional[np.ndarray] = None
+        self._latest_joint_state: JointState | None = None
+        self._latest_pose: PoseStamped | None = None
+        self._latest_image: Image | None = None
+        self._latest_action: np.ndarray | None = None
         self._latest_action_t: float = 0.0
 
-        self._episode: Optional[EpisodeBuffer] = None
+        self._episode: EpisodeBuffer | None = None
         self._writer = LeRobotShardWriter(
             root=self.dataset_root,
             dataset_name=self.dataset_name,
@@ -318,7 +317,7 @@ class DataLoggerNode(Node):
         return response
 
 
-def main(args: Optional[list[str]] = None) -> None:
+def main(args: list[str] | None = None) -> None:
     rclpy.init(args=args)
     node = DataLoggerNode()
     try:
@@ -326,14 +325,10 @@ def main(args: Optional[list[str]] = None) -> None:
     except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
         pass
     finally:
-        try:
+        with contextlib.suppress(Exception):
             node.destroy_node()
-        except Exception:  # noqa: BLE001
-            pass
-        try:
+        with contextlib.suppress(Exception):
             rclpy.shutdown()
-        except Exception:  # noqa: BLE001
-            pass
 
 
 if __name__ == "__main__":

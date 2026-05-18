@@ -27,8 +27,8 @@ EVAL_DEVICE="${EVAL_DEVICE:-cpu}"   # set to cuda:0 on the workstation
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-source /opt/ros/jazzy/setup.bash > /dev/null
-source /tmp/mybotshop_ws/install/setup.bash > /dev/null
+source /opt/ros/humble/setup.bash > /dev/null
+source /root/il_ws/install/setup.bash > /dev/null
 export PYTHONPATH="$PYTHONPATH:$REPO_ROOT/il_pipeline"
 
 if [ ! -f "$CKPT" ]; then

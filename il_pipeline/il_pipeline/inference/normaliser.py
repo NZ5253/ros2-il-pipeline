@@ -8,8 +8,6 @@ small dedicated class makes it trivial to swap normalisation strategies
 
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 import torch
 
@@ -26,10 +24,7 @@ class Normaliser:
         return torch.as_tensor(np.asarray(v, dtype=np.float32), device=self.device)
 
     def normalise_obs(self, obs: dict | np.ndarray) -> torch.Tensor:
-        if isinstance(obs, dict):
-            state = obs["observation.state"]
-        else:
-            state = obs
+        state = obs["observation.state"] if isinstance(obs, dict) else obs
         x = torch.as_tensor(state, dtype=torch.float32, device=self.device)
         return (x - self._obs_mean) / self._obs_std
 
@@ -37,7 +32,7 @@ class Normaliser:
         return action * self._act_std + self._act_mean
 
     @classmethod
-    def identity(cls, device: torch.device) -> "Normaliser":
+    def identity(cls, device: torch.device) -> Normaliser:
         # Pass-through normaliser for cases where stats are unavailable.
         # Used at startup before a dataset is trained on.
         inst = cls.__new__(cls)

@@ -12,12 +12,10 @@ can issue service calls without blocking the FastAPI event loop.
 
 from __future__ import annotations
 
-import asyncio
 import threading
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
@@ -25,7 +23,6 @@ from pydantic import BaseModel, Field
 # ROS 2 client glue lives in a separate module so this file is small and
 # the HTTP API is the focus.
 from il_pipeline.web_api.ros_bridge import RosBridge
-
 
 # ── Pydantic schemas (small, match docs/03_api_specification.md) ─────────
 
@@ -71,7 +68,7 @@ class JobRegistry:
     policies: dict[str, dict] = field(default_factory=dict)
 
 
-bridge: Optional[RosBridge] = None
+bridge: RosBridge | None = None
 registry = JobRegistry()
 
 
@@ -161,7 +158,7 @@ async def stop_recording(dataset_id: str, body: StopRecordRequest):
     }
 
 
-def _build_start_episode(body: "StartRecordRequest", dataset_id: str):
+def _build_start_episode(body: StartRecordRequest, dataset_id: str):
     """Construct a StartEpisode service request, or a tuple of (None, None) in dry-run."""
     try:
         from il_pipeline_msgs.srv import StartEpisode
@@ -174,7 +171,7 @@ def _build_start_episode(body: "StartRecordRequest", dataset_id: str):
     return StartEpisode, req
 
 
-def _build_stop_episode(body: "StopRecordRequest"):
+def _build_stop_episode(body: StopRecordRequest):
     try:
         from il_pipeline_msgs.srv import StopEpisode
     except ImportError:

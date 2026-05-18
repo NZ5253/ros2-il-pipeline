@@ -36,7 +36,6 @@ sys.path.insert(0, str(REPO_ROOT / "il_pipeline"))
 from il_pipeline.training.lerobot_torch_dataset import LeRobotTorchDataset  # noqa: E402
 from il_pipeline.training.train import BCPolicy  # noqa: E402
 
-
 # ─────────────────────────────────────────────────────────────────────────
 
 
@@ -53,11 +52,13 @@ def build_act_policy(state_dim: int, action_dim: int, chunk_size: int,
     config surface; normalisation stats come from our LeRobotDataset's stats.json.
     """
     try:
+        from lerobot.configs.types import (
+            FeatureType,
+            NormalizationMode,
+            PolicyFeature,
+        )
         from lerobot.policies.act.configuration_act import ACTConfig
         from lerobot.policies.act.modeling_act import ACTPolicy
-        from lerobot.configs.types import (
-            PolicyFeature, FeatureType, NormalizationMode,
-        )
     except ImportError as e:
         raise RuntimeError(
             "lerobot is required for --policy act. Install with `pip install lerobot`."
@@ -143,7 +144,10 @@ def main() -> None:
 
     # ── dataset ──────────────────────────────────────────────────────────
     chunk = args.chunk_size if args.policy == "act" else 1
-    ds = LeRobotTorchDataset(args.dataset, chunk_size=chunk)
+    # ACT normalizes internally from dataset_stats; skip dataset-level normalization
+    # to avoid double-normalizing inputs (training/inference would be inconsistent).
+    ds = LeRobotTorchDataset(args.dataset, chunk_size=chunk,
+                             normalize=(args.policy != "act"))
     print(f"[dataset] {len(ds)} samples  state_dim={ds.state_dim}  action_dim={ds.action_dim}  chunk={chunk}")
 
     n_val = max(1, int(len(ds) * args.validation_split))
@@ -171,7 +175,6 @@ def main() -> None:
         # at construction time so they're part of the policy state_dict).
         # We also need to split stats for observation.state into the two
         # feature streams ACT expects.
-        import json
         stats_path = args.dataset / "meta" / "stats.json"
         raw_stats = json.loads(stats_path.read_text())
         n_joints = 7

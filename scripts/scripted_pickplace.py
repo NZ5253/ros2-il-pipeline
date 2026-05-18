@@ -27,15 +27,14 @@ state machine works but the timings would need tuning.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import math
 import time
 from dataclasses import dataclass
-from typing import Optional
 
 import rclpy
 from geometry_msgs.msg import PoseStamped, Twist
 from rclpy.node import Node
-
 
 # Target zone — must match pybullet_robot_node.py
 TARGET_XY = (0.40, 0.25)
@@ -64,8 +63,8 @@ PHASE_ORDER = ["APPROACH", "DESCEND", "GRASP", "LIFT", "TRANSPORT", "DELIVER", "
 
 @dataclass
 class State:
-    ee_xyz: Optional[tuple] = None
-    cube_xyz: Optional[tuple] = None
+    ee_xyz: tuple | None = None
+    cube_xyz: tuple | None = None
 
 
 class ScriptedPickPlace(Node):
@@ -80,8 +79,8 @@ class ScriptedPickPlace(Node):
         self.max_gain = max_gain  # caps |Twist.linear| to keep motion smooth
 
         self._phase_idx = 0
-        self._phase_start_t: Optional[float] = None
-        self._cube_locked: Optional[tuple] = None  # cube_xyz snapshot at GRASP
+        self._phase_start_t: float | None = None
+        self._cube_locked: tuple | None = None  # cube_xyz snapshot at GRASP
 
         # Wait until both subscriptions have produced one message
         self.create_timer(1.0 / rate_hz, self._tick)
@@ -106,8 +105,9 @@ class ScriptedPickPlace(Node):
         if self._phase_idx >= len(PHASE_ORDER):
             self.pub.publish(Twist())  # stop
             self._finished = True
-            rclpy.shutdown()
-            return
+            # Raise to break out of spin() cleanly — don't call rclpy.shutdown()
+            # from inside a callback (it deadlocks on the executor lock).
+            raise SystemExit(0)
 
         phase = PHASE_ORDER[self._phase_idx]
         elapsed = time.time() - self._phase_start_t
@@ -129,12 +129,10 @@ class ScriptedPickPlace(Node):
 
         # Compute target EE xyz for this phase
         cube_x, cube_y, cube_z = self.state.cube_xyz
-        if phase in ("LIFT", "TRANSPORT", "DELIVER", "RELEASE", "RETREAT"):
-            # After grasping, the policy should track the cube's last known
-            # pre-grasp position rather than the actual cube (which is moving
-            # with the gripper). Lock the reference at GRASP.
-            if self._cube_locked is not None:
-                cube_x, cube_y, cube_z = self._cube_locked
+        if phase in ("LIFT", "TRANSPORT", "DELIVER", "RELEASE", "RETREAT") and self._cube_locked is not None:
+            # After grasping, track the cube's pre-grasp position (locked at GRASP)
+            # rather than the actual cube which is now moving with the gripper.
+            cube_x, cube_y, cube_z = self._cube_locked
 
         if phase == "APPROACH":
             target = (cube_x, cube_y, HOVER_Z)
@@ -196,13 +194,13 @@ def main():
     node = ScriptedPickPlace(rate_hz=args.rate, max_gain=args.max_gain)
     try:
         rclpy.spin(node)
-    except (KeyboardInterrupt, rclpy._rclpy_pybind11.RCLError):
+    except (KeyboardInterrupt, SystemExit, rclpy._rclpy_pybind11.RCLError):
         pass
     finally:
-        try:
+        with contextlib.suppress(Exception):
             node.destroy_node()
-        except Exception:  # noqa: BLE001
-            pass
+        with contextlib.suppress(Exception):
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":
