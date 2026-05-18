@@ -138,9 +138,9 @@ BC is a known weak baseline on multi-phase manipulation tasks because a state-on
 
 ### 6.2 Primary: ACT (Action Chunking Transformer)
 
-ACT predicts a chunk of `k` future actions from the current observation (no explicit state machine required). The chunk size encodes the planning horizon; `k=30` at 30 Hz means the policy plans 1 second ahead per inference step. Overlapping chunks are blended via temporal ensembling during deployment.
+ACT predicts a chunk of `k` future actions from the current observation (no explicit state machine required). The chunk size encodes the planning horizon; `k=50` at 30 Hz means the policy plans 1.67 seconds ahead per inference step — enough to span a full approach or transport phase. Overlapping chunks are blended via temporal ensembling during deployment.
 
-Training hyperparameters for this task: AdamW lr=1e-4, batch 64, chunk size 30, 1000–2000 epochs. Expected convergence on 40–50 demonstrations: 70–90 % closed-loop success rate, consistent with published ACT results on comparable pick-and-place benchmarks.
+Training hyperparameters for this task: AdamW lr=1e-4, batch 32, chunk size 50, 500 epochs on GPU. Expected convergence on 40–50 demonstrations: 70–90 % closed-loop success rate, consistent with published ACT results on comparable pick-and-place benchmarks.
 
 ### 6.3 Optional: PPO Fine-Tuning
 

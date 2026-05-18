@@ -98,45 +98,49 @@ execution, and per-episode success labelling.
 
 ```bash
 python3 - <<'EOF'
-import sys; sys.path.insert(0, "src")
+import sys; sys.path.insert(0, "il_pipeline")
 from il_pipeline.dataset.lerobot_writer import LeRobotShardWriter
 from pathlib import Path
-w = LeRobotShardWriter(root=Path("/tmp/mybotshop_demos"), dataset_name="panda_pickplace_v1")
+w = LeRobotShardWriter(root=Path("/path/to/dataset"), dataset_name="panda_pickplace_v1")
 w.finalise(["observation.state", "action"])
 print("stats.json written")
 EOF
 ```
 
+Use a persistent path (not `/tmp/`) so data survives WSL restarts. The dataset at `/mnt/c/...` or `/root/` is recommended.
+
 ---
 
 ## 5. Train the policies
 
-### BC baseline (~2 minutes on GPU)
+### BC baseline (~5 minutes on GPU)
 
 ```bash
 python3 scripts/train.py \
-    --dataset /tmp/mybotshop_demos/panda_pickplace_v1 \
+    --dataset /path/to/dataset/panda_pickplace_v1 \
     --output runs/panda_bc \
     --policy bc \
-    --epochs 200 \
+    --epochs 500 \
     --batch-size 64 \
     --lr 1e-3 \
     --device cuda:0
 ```
 
-### ACT primary policy (~30–60 minutes on GPU)
+### ACT primary policy (~80 minutes on GPU)
 
 ```bash
 python3 scripts/train.py \
-    --dataset /tmp/mybotshop_demos/panda_pickplace_v1 \
+    --dataset /path/to/dataset/panda_pickplace_v1 \
     --output runs/panda_act \
     --policy act \
-    --epochs 2000 \
+    --epochs 500 \
     --batch-size 32 \
     --lr 1e-4 \
     --chunk-size 50 \
     --device cuda:0
 ```
+
+`--epochs 500` is sufficient for convergence on this dataset with RTX 4060. Use `--epochs 2000` only if you have ~5 hours and want to squeeze out extra performance.
 
 ### Optional: Diffusion Policy comparison
 
@@ -223,17 +227,17 @@ Only re-run those if a workstation-specific dependency breaks them.
 
 ## Estimated workstation time budget
 
-| Step | Time |
+| Step | Time (measured on RTX 4060) |
 |---|---|
 | Clone + install deps | 20 min |
 | Build msgs + verify nodes | 10 min |
-| Collect 40 demos | 15 min |
-| BC training | 2 min |
-| ACT training (2000 epochs, GPU) | 30–60 min |
-| Diffusion Policy training (stretch) | 60–120 min |
-| Evaluation rollouts (20 each, BC + ACT) | 20 min |
+| Collect 40 demos | 22 min (40/40 expert success) |
+| Compute stats (finalise) | < 1 min |
+| BC training (500 epochs, GPU) | 5.2 min |
+| ACT training (500 epochs, GPU) | ~80 min |
+| Evaluation rollouts (20 each, BC + ACT) | ~15 min |
 | Demo video recording | 30 min |
-| Polish + push | 30 min |
-| **Total** | **~4 hours** |
+| Polish + push | 20 min |
+| **Total** | **~3.5 hours** |
 
-Comfortable inside one workday.
+Note: ACT with `--epochs 2000` on RTX 4060 takes ~5 hours, not 30–60 min. Use `--epochs 500` for a 80-minute run that still converges on this dataset.
