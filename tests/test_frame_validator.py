@@ -1,10 +1,7 @@
 """Tests for the per-frame validator used by the data logger."""
 
-import math
 
 import numpy as np
-import pytest
-
 from il_pipeline.dataset.frame_validator import FrameValidator
 
 

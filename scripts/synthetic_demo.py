@@ -21,19 +21,18 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import sys
 import time
 from pathlib import Path
 
 import numpy as np
 import torch
 
-import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "il_pipeline"))
 
-from il_pipeline.dataset.lerobot_writer import LeRobotShardWriter   # noqa: E402
+from il_pipeline.dataset.lerobot_writer import LeRobotShardWriter  # noqa: E402
 from il_pipeline.training.lerobot_torch_dataset import LeRobotTorchDataset  # noqa: E402
 from il_pipeline.training.train import BCPolicy  # noqa: E402
-
 
 N_JOINTS = 7
 STATE_DIM = 2 * N_JOINTS + 7   # joint pos + joint vel + EE pose (xyz + quat)

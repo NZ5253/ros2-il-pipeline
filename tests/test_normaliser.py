@@ -1,9 +1,7 @@
 """Tests for the inference-time normaliser."""
 
 import numpy as np
-import pytest
 import torch
-
 from il_pipeline.inference.normaliser import Normaliser
 
 

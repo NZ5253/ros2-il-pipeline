@@ -1,11 +1,9 @@
 """Tests for the PyTorch adapter that reads LeRobot parquet shards."""
 
-import json
 from pathlib import Path
 
 import numpy as np
 import torch
-
 from il_pipeline.dataset.lerobot_writer import LeRobotShardWriter
 from il_pipeline.training.lerobot_torch_dataset import LeRobotTorchDataset
 
@@ -58,7 +56,7 @@ def test_act_chunk_dataset_drops_tail(tmp_path: Path):
 def test_normalisation_applied_when_stats_exist(tmp_path: Path):
     root = _build_dataset(tmp_path, n_episodes=2, frames_per_ep=10)
     ds = LeRobotTorchDataset(root, chunk_size=1)
-    sample = ds[0]
+    ds[0]  # warm up / verify indexing works
     # With normalisation the mean across the dataset should be near zero
     states = torch.stack([ds[i]["observation.state"] for i in range(len(ds))])
     mean_per_dim = states.mean(dim=0).abs().max().item()

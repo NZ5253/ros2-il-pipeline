@@ -5,9 +5,7 @@ goes down. Doesn't claim convergence — only that the forward/backward
 pipeline is intact.
 """
 
-import numpy as np
 import torch
-
 from il_pipeline.training.train import BCPolicy
 
 

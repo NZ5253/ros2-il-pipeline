@@ -42,7 +42,7 @@ def ascii_plot(records: list[dict]) -> str:
     out = []
     out.append(f"{'epoch':>6} {'train':>10} {'val':>10}")
     out.append("-" * 30)
-    for e, t, v in zip(epochs, train, val):
+    for e, t, v in zip(epochs, train, val, strict=False):
         out.append(f"{e:>6} {t:>10.4f} {v:>10.4f}")
     return "\n".join(out)
 

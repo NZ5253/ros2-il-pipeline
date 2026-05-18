@@ -14,7 +14,7 @@ either way, so the rest of the pipeline is unchanged.
 from __future__ import annotations
 
 import argparse
-import math
+import contextlib
 import time
 
 import rclpy
@@ -55,11 +55,9 @@ class ScriptedTeleop(Node):
             # Out then back: two smoothsteps in opposite directions
             phase = t * 2.0
             if phase < 1.0:
-                u = phase * phase * (3.0 - 2.0 * phase)
                 sign = 1.0
             else:
                 phase -= 1.0
-                u = phase * phase * (3.0 - 2.0 * phase)
                 sign = -1.0
             v = sign * (6.0 * phase * (1.0 - phase))  # velocity = derivative
         else:
@@ -100,10 +98,8 @@ def main():
         # raised when shutdown() is called inside the timer; ignore
         pass
     finally:
-        try:
+        with contextlib.suppress(Exception):
             node.destroy_node()
-        except Exception:  # noqa: BLE001
-            pass
 
 
 if __name__ == "__main__":
