@@ -19,7 +19,7 @@ docs/
   api.md           REST + WebSocket spec
   results.md       numbers
 il_pipeline/       ROS 2 ament_python package
-il_pipeline_msgs/  custom .srv / .msg / .action
+il_pipeline_msgs/  three custom .srv files (StartEpisode, StopEpisode, LoadPolicy)
 scripts/           collect, train, evaluate, record
 tests/             25 unit tests
 RUNBOOK.md         reproduce end-to-end on a fresh machine

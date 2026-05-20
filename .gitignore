@@ -42,8 +42,11 @@ wandb/
 
 # Generated docs / outputs
 docs/_build/
-*.mp4
 *.webm
+
+# demo.mp4 lives at the repo root and is part of the submission;
+# everything else recorded under runs/ is ignored.
+runs/*.mp4
 
 # Local config secrets
 .env

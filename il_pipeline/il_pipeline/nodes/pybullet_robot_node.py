@@ -83,6 +83,12 @@ class PyBulletRobotNode(Node):
         self.declare_parameter("ee_step_scale", 0.01)
         self.declare_parameter("gripper_open", True)
         self.declare_parameter("seed", 0)
+        # Cube spawn range. Defaults match the training distribution; an
+        # OOD eval can override these to spawn outside the training range.
+        self.declare_parameter("cube_spawn_x_min", CUBE_SPAWN_X_RANGE[0])
+        self.declare_parameter("cube_spawn_x_max", CUBE_SPAWN_X_RANGE[1])
+        self.declare_parameter("cube_spawn_y_min", CUBE_SPAWN_Y_RANGE[0])
+        self.declare_parameter("cube_spawn_y_max", CUBE_SPAWN_Y_RANGE[1])
 
         self.sim_step_dt = 1.0 / self.get_parameter("sim_step_hz").value
         self.publish_dt = 1.0 / self.get_parameter("publish_hz").value
@@ -176,8 +182,14 @@ class PyBulletRobotNode(Node):
         """Spawn (or respawn) the task cube on the table at a randomised pose."""
         if self._cube_id is not None:
             p.removeBody(self._cube_id)
-        x = self._rng.uniform(*CUBE_SPAWN_X_RANGE)
-        y = self._rng.uniform(*CUBE_SPAWN_Y_RANGE)
+        x = self._rng.uniform(
+            self.get_parameter("cube_spawn_x_min").value,
+            self.get_parameter("cube_spawn_x_max").value,
+        )
+        y = self._rng.uniform(
+            self.get_parameter("cube_spawn_y_min").value,
+            self.get_parameter("cube_spawn_y_max").value,
+        )
         col = p.createCollisionShape(p.GEOM_BOX, halfExtents=[CUBE_SIZE / 2] * 3)
         vis = p.createVisualShape(
             p.GEOM_BOX,
