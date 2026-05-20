@@ -16,7 +16,7 @@
 
 set +e
 
-POLICY_CKPT="${POLICY_CKPT:-runs/panda_act/best.pt}"
+POLICY_CKPT="${POLICY_CKPT:-runs/panda_act_v2/best.pt}"
 POLICY_TYPE="${POLICY_TYPE:-act}"
 N_ROLLOUTS="${N_ROLLOUTS:-5}"
 EVAL_DEVICE="${EVAL_DEVICE:-cuda:0}"
