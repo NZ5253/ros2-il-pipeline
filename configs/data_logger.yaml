@@ -5,7 +5,7 @@
 data_logger_node:
   ros__parameters:
     dataset_root: "/data/lerobot_datasets"
-    dataset_name: "panda_pickplace_v1"
+    dataset_name: "panda_pickplace_v2"
     joint_state_topic: "/joint_states"
     cartesian_pose_topic: "/cartesian_pose"
     teleop_cmd_topic: "/teleop_cmd"

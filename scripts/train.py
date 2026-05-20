@@ -8,13 +8,13 @@ flags.
 
 Usage (CPU smoke run on dev box):
     python3 scripts/train.py --policy bc \
-        --dataset /tmp/mybotshop_demos/panda_pickplace_v1 \
+        --dataset /tmp/mybotshop_demos/panda_pickplace_v2 \
         --output runs/panda_bc \
         --epochs 200 --batch-size 64 --device cpu
 
 Usage (workstation, GPU):
     python3 scripts/train.py --policy act \
-        --dataset /tmp/mybotshop_demos/panda_pickplace_v1 \
+        --dataset /tmp/mybotshop_demos/panda_pickplace_v2 \
         --output runs/panda_act \
         --epochs 2000 --batch-size 32 --chunk-size 50 --device cuda:0
 """

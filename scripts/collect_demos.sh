@@ -20,7 +20,7 @@
 set +e
 
 N_EPISODES="${1:-30}"
-DATASET_NAME="${2:-panda_pickplace_v1}"
+DATASET_NAME="${2:-panda_pickplace_v2}"
 DATASET_ROOT="${DATASET_ROOT:-/tmp/mybotshop_demos}"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
