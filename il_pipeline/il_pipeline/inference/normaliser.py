@@ -13,12 +13,20 @@ import torch
 
 
 class Normaliser:
+    # Floor std at this value to avoid NaN for action dims the expert never
+    # exercises (e.g. gripper command in constraint-grasp pick-and-place).
+    _STD_FLOOR = 1e-6
+
     def __init__(self, stats: dict, device: torch.device) -> None:
         self.device = device
         self._obs_mean = self._to_tensor(stats["observation.state"]["mean"])
-        self._obs_std = self._to_tensor(stats["observation.state"]["std"])
+        self._obs_std = torch.clamp(
+            self._to_tensor(stats["observation.state"]["std"]), min=self._STD_FLOOR,
+        )
         self._act_mean = self._to_tensor(stats["action"]["mean"])
-        self._act_std = self._to_tensor(stats["action"]["std"])
+        self._act_std = torch.clamp(
+            self._to_tensor(stats["action"]["std"]), min=self._STD_FLOOR,
+        )
 
     def _to_tensor(self, v) -> torch.Tensor:
         return torch.as_tensor(np.asarray(v, dtype=np.float32), device=self.device)

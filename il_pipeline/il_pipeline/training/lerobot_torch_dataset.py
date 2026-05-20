@@ -89,8 +89,14 @@ class LeRobotTorchDataset(Dataset):
             actions = actions[0]  # squeeze for BC
 
         if self._stats is not None:
-            obs = (obs - self._stats["observation.state"]["mean"]) / self._stats["observation.state"]["std"]
-            actions = (actions - self._stats["action"]["mean"]) / self._stats["action"]["std"]
+            # Floor std at 1e-6 to avoid NaN for dimensions the expert
+            # never exercises (e.g. gripper command stays 0 throughout a
+            # scripted pick-and-place that uses constraint-based grasping
+            # → std=0 → 0/0 = NaN, which poisons training).
+            obs_std = np.maximum(self._stats["observation.state"]["std"], 1e-6)
+            act_std = np.maximum(self._stats["action"]["std"], 1e-6)
+            obs = (obs - self._stats["observation.state"]["mean"]) / obs_std
+            actions = (actions - self._stats["action"]["mean"]) / act_std
 
         return {
             "observation.state": torch.from_numpy(np.asarray(obs, dtype=np.float32)),
