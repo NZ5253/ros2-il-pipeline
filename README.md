@@ -1,54 +1,43 @@
-# Imitation Learning Pipeline — MyBotShop Webserver Integration
+# MyBotShop IL Pipeline
 
-A ROS 2 imitation-learning pipeline for manipulation, designed as a modular extension to the MyBotShop robotic webserver. Demonstrations are recorded through the platform's teleop stream, stored as LeRobotDataset shards, and a trained policy is deployed back through the same `/cmd_robot` topic the teleoperator drove.
+Imitation-learning pipeline for the MyBotShop robotic webserver. Records demos through the existing teleop stream, trains a policy on them, and deploys it back through the same controller the teleoperator drove.
 
-## Headline result
+## Results
 
-| Policy | Closed-loop success | Inference latency | Notes |
-|---|---:|---:|---|
-| **ACT** (primary) | **19 / 20 = 95 %** | < 20 ms | LeRobot ACT, temporal ensembling |
-| **Diffusion Policy** | **18 / 20 = 90 %** | < 30 ms | LeRobot DP, 10-step DDIM at deploy |
+20 closed-loop rollouts on pick-and-place (random cube spawn, Franka Panda in PyBullet, RTX 4060):
 
-Task: pick a randomly-spawned red cube and place it on a green target zone (8 cm radius) using a 7-DOF Franka Panda in PyBullet. 80 demonstrations, 30 Hz control loop, RTX 4060.
+- ACT — 19/20 (95%)
+- Diffusion Policy — 18/20 (90%)
 
-Demo video: [`demo.mp4`](demo.mp4) — 2:45, five consecutive rollouts.
+Demo: [`demo.mp4`](demo.mp4) — 5 rollouts, ~2:45.
 
-## Repository layout
+## Repo
 
 ```
 docs/
-  01_concept.md             technical concept
-  02_architecture.md        node + topic diagram
-  03_api.md                 REST + WebSocket API
-  04_dataset.md             LeRobotDataset schema
-  05_results.md             experiment numbers
-il_pipeline/                ROS 2 ament_python package
-  il_pipeline/nodes/        data_logger, inference, pybullet_robot
-  il_pipeline/dataset/      LeRobot parquet writer + frame validator
-  il_pipeline/training/     policies (BC, ACT, Diffusion) + dataset loader
-  il_pipeline/inference/    policy loader + normaliser
-  il_pipeline/web_api/      FastAPI service + ROS bridge
-il_pipeline_msgs/           ROS 2 .srv / .msg / .action definitions
-scripts/                    collect / train / evaluate / record_demo
-tests/                      25 unit tests
-WORKSTATION_RUNBOOK.md      end-to-end reproduction
+  concept.md       what it is, how it's put together, why these choices
+  api.md           REST + WebSocket spec
+  results.md       numbers
+il_pipeline/       ROS 2 ament_python package
+il_pipeline_msgs/  custom .srv / .msg / .action
+scripts/           collect, train, evaluate, record
+tests/             25 unit tests
+RUNBOOK.md         reproduce end-to-end on a fresh machine
 ```
 
-## Run the demo
-
-Requires ROS 2 Humble, Python 3.10, CUDA, the `lerobot` library.
+## Run
 
 ```bash
-# Bring up the full stack
+# bring up everything
 ros2 launch il_pipeline pipeline.launch.py
 
-# Record a fresh demo.mp4 with the trained ACT policy
+# or just record a new demo with the trained ACT policy
 bash scripts/record_demo.sh
 ```
 
-Full reproduction (collect → train → evaluate) in [`WORKSTATION_RUNBOOK.md`](WORKSTATION_RUNBOOK.md).
+Full reproduction in [`RUNBOOK.md`](RUNBOOK.md).
 
-## Contact
+---
 
 Naeem Zain Uddin · naeemzainuddin5253@gmail.com
 M.Sc. Automation & Robotics, TU Dortmund
