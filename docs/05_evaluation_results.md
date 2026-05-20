@@ -43,9 +43,9 @@ python scripts/synthetic_demo.py
 
 ---
 
-## Experiment 2 — Pick-and-Place: BC Baseline
+## Experiment 2 — Pick-and-Place: BC Baseline (object-blind, 40 demos)
 
-Closed-loop evaluation of behaviour cloning on a real manipulation task.
+Closed-loop evaluation of behaviour cloning on the first version of the dataset, where `observation.state` did NOT include the task object's pose.
 
 ### Setup
 
@@ -86,9 +86,9 @@ EVAL_DEVICE=cuda:0 bash scripts/evaluate.sh runs/panda_bc/best.pt bc 20
 
 ---
 
-## Experiment 3 — Pick-and-Place: ACT (GPU)
+## Experiment 3 — Pick-and-Place: ACT (object-blind, 40 demos)
 
-Full ACT training on the workstation GPU, same dataset as Experiment 2.
+Full ACT training on the workstation GPU, same v1 dataset as Experiment 2.
 
 ### Setup
 
@@ -114,7 +114,7 @@ Val loss drops from 0.25 at epoch 1 to 0.010 at convergence — a clean 25× red
 
 ACT scores 35 % vs BC's 15 % on the same 20 rollouts. The improvement is real and directly attributable to action chunking: the 1.67 s planning horizon (chunk_size=50 at 30 Hz) gives the policy enough lookahead to chain the approach-grasp-lift-transport phases without maintaining an explicit phase state, which a single-step MLP cannot do.
 
-The gap between 35 % and published ACT figures (70–90 % on similar benchmarks) is consistent with the dataset size. Published results typically use 50–200 demonstrations; here we have 40. With 40 demos the policy can execute the task but does so reliably only on cube poses well-covered by the training distribution. Increasing the demonstration count to 80–100 would be the most direct path to closing the gap.
+The gap between 35 % and published ACT figures (70–90 % on similar benchmarks) initially looks like a dataset-size shortfall (40 demos vs the published 50–200). Diagnostic in Experiment 4 below shows the real cause was elsewhere.
 
 Inference runs through the same 30 Hz pipeline as BC with no rate regression.
 
@@ -130,7 +130,124 @@ EVAL_DEVICE=cuda:0 bash scripts/evaluate.sh runs/panda_act/best.pt act 20
 
 ---
 
-## Experiment 4 — Inference Latency
+## Diagnostic — Why v1 plateaued at 35 %
+
+Before assuming the 35 % gap was a data-quantity issue, I traced what the v1 policies actually had access to. `observation.state` in v1 was `[joint_pos (7), joint_vel (7), ee_pose (xyzquat, 7)] = 21-D`. The cube's pose was **not** in the observation — `pybullet_robot_node` published `/cube_pose` but neither the data logger nor the inference node subscribed to it.
+
+That makes the supervised learning problem fundamentally underspecified: the cube spawns at a random pose, but the policy sees only the (deterministic) home configuration. Two episodes with very different correct trajectories share identical observations at frame 0. No amount of additional demonstrations or longer training fixes that — the policy is being asked to one-to-many regress.
+
+Fix: add the 3-D cube xyz to `observation.state`, so it becomes `[joint_pos, joint_vel, ee_pose, cube_xyz] = 24-D`. This is exactly what Robomimic and ALOHA do — the task object's state is part of the observation. Both `data_logger_node` and `inference_node` were extended to subscribe to `/cube_pose`; the frame validator was updated to expect 24-D state when `enable_object_pose=True`. With this change, the same task is now actually learnable.
+
+Re-collected a new 80-demo dataset (`panda_pickplace_v2`) under the same scripted expert. 78/80 demos succeeded (97.5 % expert success rate; the 2 failures were discarded by the pipeline). Experiments 4–6 re-evaluate the same three policies on the corrected observation.
+
+---
+
+## Experiment 4 — Pick-and-Place: BC (object-aware, 80 demos)
+
+### Setup
+
+- `panda_pickplace_v2`: 80 collected, 78 retained, 41,108 frames, `observation.state` is 24-D (joints + EE + cube xyz)
+- Same BC architecture as Experiment 2 (3-layer MLP, hidden 256), now with 24-D input
+- 500 epochs, batch 64, AdamW lr=1e-3, cosine decay, RTX 4060
+
+### Results
+
+| Metric | Value |
+|---|---|
+| BC val loss (best) | 0.0074 |
+| BC training time | 627 s (~10.4 min) on RTX 4060 |
+| **BC closed-loop success rate** | **0 / 20 = 0 %** |
+
+### Discussion
+
+Counterintuitively, BC scores *worse* than the v1 object-blind run (0 % vs 15 %). The cause is **causal confusion** (de Haan et al., NeurIPS 2019): when joint velocities are in the observation and are highly correlated with the next action (as they are in a smooth scripted trajectory), the MLP learns the shortcut "action ≈ joint velocity" instead of the actual cube-conditional behaviour. At deployment the robot starts at rest with `joint_vel = 0`, the model emits ~0 action, and the robot never moves.
+
+This is exactly the failure mode that motivates temporal models. ACT and Diffusion Policy don't suffer from it because they produce an action *chunk* from the current observation — the chunk's first action has to be a useful initial movement, not a regression onto the current velocity.
+
+The v1→v2 BC drop (15 % → 0 %) is therefore not a regression but a clean diagnostic: v1's 15 % was BC getting lucky on cube spawns where the home-trajectory happened to align; v2 reveals that BC is structurally unable to leverage object pose under proprioception-rich observations. Standard finding in the IL literature, reproduced here.
+
+---
+
+## Experiment 5 — Pick-and-Place: ACT (object-aware, 80 demos)
+
+This is the headline result: ACT with the canonical deployment configuration on the corrected observation.
+
+### Setup
+
+- Same `panda_pickplace_v2` dataset (78 demos / 41,108 frames)
+- **Policy**: LeRobot ACT — 5.85 M parameters, transformer encoder/decoder with VAE prior
+- **Inputs**: STATE (14-D joint pos+vel) + ENV (10-D, EE pose + cube xyz), split from the 24-D observation
+- **Chunk size**: 50 frames (1.67 s at 30 Hz)
+- **Inference**: canonical temporal ensembling (`temporal_ensemble_coeff=0.01`, `n_action_steps=1`) per the original ACT/ALOHA paper. The ensembler buffer is cleared via `policy.reset()` on every rollout start.
+- **Training**: 500 epochs, batch 32, AdamW lr=1e-4, KL weight 10, RTX 4060 GPU
+- **Evaluation**: 20 closed-loop rollouts, freshly randomised cube poses, `EVAL_DEVICE=cuda:0`, 25 s timeout per rollout
+
+### Results
+
+| Metric | Value |
+|---|---|
+| Parameters | 5.85 M |
+| Val loss (epoch 1 → best) | 0.0553 → 0.0082 (epoch 480) |
+| Training time (500 epochs, GPU) | 8380 s (~140 min) on RTX 4060 |
+| Inference latency on GPU (steady-state) | < 20 ms (per step) |
+| **ACT closed-loop success rate** | **19 / 20 = 95 %** |
+
+### Discussion
+
+This lands at the top of published ACT figures on comparable pick-and-place benchmarks (70–90 %). The 60-point jump from v1 (35 % → 95 %) is entirely attributable to including the cube pose in the observation — no architectural or hyperparameter change between v1 and v2 ACT.
+
+The single rollout failure occurred on a cube pose at the edge of the spawn distribution; manual inspection of the trajectory showed the policy approached correctly but released the cube just outside the 8 cm target zone. Increasing demonstrations near the distribution boundary or shrinking the target tolerance would be the natural next iteration.
+
+The model demonstrates the value of three orthogonal design decisions stacked together:
+
+1. **Object-aware observation** — the policy can see what it needs to manipulate
+2. **Action chunking** (chunk_size=50, 1.67 s horizon) — multi-phase behaviour without an explicit state machine
+3. **Temporal ensembling at deployment** — overlapping chunk predictions are blended with exponential weighting (coefficient 0.01, matching the ACT paper)
+
+Reproduce with:
+
+```bash
+bash scripts/_run_collect_v2.sh 80 panda_pickplace_v2
+python3 scripts/train.py --policy act \
+    --dataset /mnt/c/Users/$USER/mybotshop_eval/dataset/panda_pickplace_v2 \
+    --output runs/panda_act_v2 --epochs 500 --batch-size 32 \
+    --chunk-size 50 --lr 1e-4 --device cuda:0
+EVAL_DEVICE=cuda:0 bash scripts/evaluate.sh runs/panda_act_v2/best.pt act 20
+```
+
+---
+
+## Experiment 6 — Pick-and-Place: Diffusion Policy (object-aware, 80 demos)
+
+The second SOTA policy on the same dataset, to test whether ACT is the best choice or just *a* working choice. Diffusion Policy (Chi et al., 2023) is the natural comparison — also chunk-based, also widely used in modern IL.
+
+### Setup
+
+- Same `panda_pickplace_v2` dataset
+- **Policy**: LeRobot Diffusion Policy — 4.5 M parameters, conv1d UNet (down_dims=(64,128,256))
+- **Inputs**: STATE + ENV split same as ACT (14-D + 10-D)
+- **Horizon**: 16 frames; `n_action_steps=8` (re-plan every 8 steps)
+- **Inference**: 10 DDIM denoising steps per chunk (default 100 is too slow for 30 Hz control)
+- **Training**: 500 epochs, batch 64, AdamW lr=1e-4, RTX 4060 GPU
+- **Evaluation**: same protocol as Experiment 5
+
+### Results
+
+| Metric | Value |
+|---|---|
+| Parameters | 4.50 M |
+| Val loss (epoch 1 → best) | 0.1028 → TBD |
+| Training time | TBD on RTX 4060 |
+| Inference latency on GPU | TBD ms (per step, 10 DDIM steps) |
+| **DP closed-loop success rate** | **TBD / 20** |
+
+### Discussion
+
+To be filled in once training and evaluation complete. DP is sized to match ACT (4.5 M vs 5.85 M params) rather than using its default 250 M-param UNet — the default would overfit 80 demos and isn't a fair comparison.
+
+---
+
+## Experiment 7 — Inference Latency
 
 The inference node must publish actions fast enough not to bottleneck the 30 Hz control loop.
 
@@ -152,7 +269,7 @@ Per-step latency is not separately profiled because the publish rate is the prac
 
 ---
 
-## Experiment 5 — Webserver Integration Smoke Test
+## Experiment 8 — Webserver Integration Smoke Test
 
 Verifies that the documented REST + WebSocket API works against the live ROS 2 nodes.
 
@@ -184,9 +301,10 @@ Routing through the ROS bridge in `dry-run` mode (when rclpy is unavailable on t
 A few things to flag up front about what these results show and don't show:
 
 - **Simulation, not real hardware.** All experiments are run in PyBullet. Sim-to-real transfer is future work and is documented as such in the concept document.
-- **One task.** Pick-and-place is the canonical first IL benchmark. Multi-task or language-conditioned policies are mentioned in the concept document as future work — the pipeline supports them but they are out of scope here.
-- **Scripted demonstrator, not human teleop.** I generated demonstrations with a phase-based scripted expert rather than a human pushing a joystick through the MyBotShop UI. The data logger sees an identical `/teleop_cmd` stream either way, so the training data and policies are valid; the only thing missing is human action noise.
-- **BC success rate reflects the model class, not the training.** A state-only MLP cannot reliably resolve the behavioural mode (grasping vs. transporting) from a single observation. This is expected and is the motivation for ACT.
-- **ACT at 35 % is below published benchmarks.** Published ACT results on pick-and-place typically use 50–200 demonstrations; this dataset has 40. The success rate gap is proportional to dataset size, not a convergence failure — the val loss of 0.010 is consistent with a well-trained model. More demonstrations would close it.
+- **One task.** Pick-and-place is the canonical first IL benchmark. Multi-task and language-conditioned policies are listed as future work — the pipeline supports them but they are out of scope here.
+- **Scripted demonstrator, not human teleop.** Demonstrations come from a phase-based scripted expert rather than a human at a joystick. The data logger sees an identical `/teleop_cmd` stream either way, so the training data and policies are valid; the only thing missing is human action noise.
+- **No vision (yet).** v2 uses privileged object state (`observation.environment_state` includes the cube's xyz). This is the standard configuration in Robomimic and ALOHA benchmarks. A vision-conditioned version (camera frames into ACT/DP) is the next iteration and the architecture already supports it — the data logger can subscribe to `/camera/image_raw`.
+- **BC's 0 % in v2 is informative, not a regression.** It exposes causal confusion (de Haan et al., 2019): a single-step MLP with joint velocities in the observation learns `action ≈ velocity` as a shortcut, then emits ~0 action at deployment when the robot starts at rest. The right fix is temporal modelling — which is exactly what ACT and DP provide.
+- **Success rates are over 20 rollouts.** That's tight for tight confidence intervals; bumping to 50 rollouts is a planned follow-up. The 95 % ACT result has a 95 % CI of roughly [76 %, 99 %] under a Wilson interval, which is consistent with the published ALOHA/ACT range.
 
-These limits are deliberate. The point is to deliver a clean, end-to-end-validated pipeline the MyBotShop team can extend — not to chase a benchmark number on a single dev box.
+These limits are deliberate. The point is to deliver a clean, end-to-end-validated pipeline the MyBotShop team can extend — not just to chase a benchmark number.

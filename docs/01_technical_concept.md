@@ -59,6 +59,7 @@ Subscribes to:
 - `/joint_states` — `sensor_msgs/JointState`
 - `/cartesian_pose` — `geometry_msgs/PoseStamped` (end-effector pose, if available)
 - `/teleop_cmd` — `geometry_msgs/Twist` or `sensor_msgs/JointJog` (the teleop action stream from the existing platform)
+- `/cube_pose` (or any task-object pose topic) — `geometry_msgs/PoseStamped`, controlled by the `enable_object_pose` parameter. Standard practice in IL benchmarks (Robomimic, ALOHA): the manipulated object's pose has to be part of the observation, otherwise random-object tasks are under-specified.
 - `/camera/image_raw` — `sensor_msgs/Image` (optional, if a wrist or scene camera is configured)
 
 Exposes:
@@ -82,6 +83,7 @@ This node delegates to the LeRobot trainer; ROS 2 is used only as the control pl
 Subscribes to:
 - `/joint_states`
 - `/cartesian_pose` (optional)
+- `/cube_pose` / task-object pose (same `enable_object_pose` flag as the data logger — has to match what the policy was trained with)
 - `/camera/image_raw` (optional)
 
 Publishes to:
@@ -124,7 +126,7 @@ See [`03_api_specification.md`](03_api_specification.md) for the full web-layer 
 
 The dataset uses **LeRobotDataset** (parquet shards, HuggingFace `datasets`-compatible). This avoids inventing a custom format and gives ACT, Diffusion Policy, and OpenVLA direct access to the data without conversion. Visualisation and HF Hub upload are included.
 
-Schema per frame: `observation.state` (joint positions + velocities + EE pose), `action` (delta-EE Twist), `timestamp`, `episode_index`, `frame_index`, `task` string. Camera frames are optional. Full schema in [`04_dataset_schema.md`](04_dataset_schema.md).
+Schema per frame: `observation.state` (joint positions + velocities + EE pose + task-object xyz for object-aware tasks), `action` (delta-EE Twist + gripper), `timestamp`, `episode_index`, `frame_index`, `task` string. Camera frames are optional. The decision to include the task-object's pose in the observation is deliberate and matches the Robomimic and ALOHA conventions — without it, random-object manipulation tasks are under-specified at the supervised-learning level and no amount of additional demonstrations recovers the lost information. Full schema in [`04_dataset_schema.md`](04_dataset_schema.md).
 
 ---
 
@@ -138,11 +140,17 @@ BC is a known weak baseline on multi-phase manipulation tasks because a state-on
 
 ### 6.2 Primary: ACT (Action Chunking Transformer)
 
-ACT predicts a chunk of `k` future actions from the current observation (no explicit state machine required). The chunk size encodes the planning horizon; `k=50` at 30 Hz means the policy plans 1.67 seconds ahead per inference step — enough to span a full approach or transport phase. Overlapping chunks are blended via temporal ensembling during deployment.
+ACT predicts a chunk of `k` future actions from the current observation (no explicit state machine required). The chunk size encodes the planning horizon; `k=50` at 30 Hz means the policy plans 1.67 seconds ahead per inference step — enough to span a full approach or transport phase.
 
-Training hyperparameters for this task: AdamW lr=1e-4, batch 32, chunk size 50, 500 epochs on GPU. Expected convergence on 40–50 demonstrations: 70–90 % closed-loop success rate, consistent with published ACT results on comparable pick-and-place benchmarks.
+At deployment, overlapping chunks are blended via **temporal ensembling** — the canonical ACT-paper inference path: `temporal_ensemble_coeff=0.01`, `n_action_steps=1`, with the ensembler buffer cleared on each new rollout. The policy is queried every step and the ensembler weighted-averages predictions for the current timestep across all overlapping chunks. This is meaningfully different from the alternative ("run each predicted chunk open-loop until exhausted, then re-plan") and is what the original ACT paper argues for.
 
-### 6.3 Optional: PPO Fine-Tuning
+Training hyperparameters: AdamW lr=1e-4, batch 32, chunk size 50, 500 epochs on GPU. Achieved on the 80-demo object-aware dataset: **95 % closed-loop success rate (19/20)**, at the top of published ACT figures for this task. See [`05_evaluation_results.md`](05_evaluation_results.md) for full numbers and the diagnostic that led from the initial 35 % object-blind run to this.
+
+### 6.3 Comparison Policy: Diffusion Policy
+
+The same train.py supports `--policy diffusion`, which trains a LeRobot Diffusion Policy under the same dataset, normalisation, and STATE/ENV feature split as ACT. The UNet is deliberately sized to ~4.5 M params (`down_dims=(64,128,256)`) to match ACT's 5.85 M for a fair comparison — DP's default 250 M-param UNet would overfit 80 demos. At inference, DP runs 10 DDIM denoising steps per chunk (default 100 is too slow for 30 Hz control). DP serves as the second SOTA point that confirms the architectural choice (chunked policy on object-aware state) rather than a single-policy lottery.
+
+### 6.4 Optional: PPO Fine-Tuning
 
 The trained IL policy serves as initialisation for PPO (Stable-Baselines3) fine-tuning against a sparse success reward in simulation. The integration point is a `policy_bridge` module that exposes the IL policy's `predict()` and the RL actor's `act(obs, deterministic) -> (action, log_prob, value)`. This connects directly to my thesis work on PPO with shaped rewards.
 

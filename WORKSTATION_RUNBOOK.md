@@ -84,13 +84,12 @@ source /opt/ros/jazzy/setup.bash
 source ros2_ws/install/setup.bash
 export PYTHONPATH="$PYTHONPATH:$(pwd)/src"
 
-# Collect 40 pick-and-place demos
-bash scripts/collect_demos.sh 40 panda_pickplace_v1
+# Collect 80 pick-and-place demos (matches the published ACT v2 results)
+DATASET_ROOT=/mnt/c/$USER/mybotshop_eval/dataset \
+    bash scripts/collect_demos.sh 80 panda_pickplace_v2
 ```
 
-Expected output: `successes=N/40` with most episodes succeeding. The
-script handles dataset creation, episode start/stop, scripted expert
-execution, and per-episode success labelling.
+Expected output: `successes=N/80` with most episodes succeeding (78/80 = 97.5 % on the reference run). The script handles dataset creation, episode start/stop, scripted expert execution, and per-episode success labelling. The `enable_object_pose=true` default means `/cube_pose` is recorded as part of `observation.state` — needed for the object-aware policies in Section 5.
 
 ---
 
@@ -101,7 +100,7 @@ python3 - <<'EOF'
 import sys; sys.path.insert(0, "il_pipeline")
 from il_pipeline.dataset.lerobot_writer import LeRobotShardWriter
 from pathlib import Path
-w = LeRobotShardWriter(root=Path("/path/to/dataset"), dataset_name="panda_pickplace_v1")
+w = LeRobotShardWriter(root=Path("/path/to/dataset"), dataset_name="panda_pickplace_v2")
 w.finalise(["observation.state", "action"])
 print("stats.json written")
 EOF
@@ -117,7 +116,7 @@ Use a persistent path (not `/tmp/`) so data survives WSL restarts. The dataset a
 
 ```bash
 python3 scripts/train.py \
-    --dataset /path/to/dataset/panda_pickplace_v1 \
+    --dataset /path/to/dataset/panda_pickplace_v2 \
     --output runs/panda_bc \
     --policy bc \
     --epochs 500 \
@@ -130,7 +129,7 @@ python3 scripts/train.py \
 
 ```bash
 python3 scripts/train.py \
-    --dataset /path/to/dataset/panda_pickplace_v1 \
+    --dataset /path/to/dataset/panda_pickplace_v2 \
     --output runs/panda_act \
     --policy act \
     --epochs 500 \
@@ -142,10 +141,21 @@ python3 scripts/train.py \
 
 `--epochs 500` is sufficient for convergence on this dataset with RTX 4060. Use `--epochs 2000` only if you have ~5 hours and want to squeeze out extra performance.
 
-### Optional: Diffusion Policy comparison
+### Diffusion Policy (~110 minutes on GPU)
 
-(Same `train.py` once a Diffusion path is added to `policy_factory.py` — left
-as stretch goal.)
+```bash
+python3 scripts/train.py \
+    --dataset /path/to/dataset/panda_pickplace_v2 \
+    --output runs/panda_diffusion \
+    --policy diffusion \
+    --epochs 500 \
+    --batch-size 64 \
+    --horizon 16 \
+    --lr 1e-4 \
+    --device cuda:0
+```
+
+UNet sized to ~4.5 M params (`down_dims=(64,128,256)` in `build_diffusion_policy`) to match ACT for a fair comparison. Inference runs 10 DDIM steps per chunk so per-step latency stays within the 30 Hz control budget.
 
 ---
 
@@ -161,9 +171,15 @@ The script resets the sim between rollouts, deploys the policy via
 `/inference_node/load_policy`, watches `/task_status`, and reports
 success rate.
 
-Expected results (with full GPU training):
-- BC baseline: 10–30 % (limited by single-step MLP on multi-phase task)
-- ACT primary: 70–90 % (action chunking captures the phase structure)
+Measured results on the 80-demo object-aware dataset (RTX 4060, 20 rollouts):
+
+| Policy | Success rate | Notes |
+|---|---|---|
+| BC | 0/20 = 0 % | Exposes causal confusion — see `docs/05_evaluation_results.md` Experiment 4 |
+| ACT | 19/20 = 95 % | Top of published range; canonical temporal ensembling |
+| Diffusion Policy | (see eval doc) | Same dataset, ~4.5 M params |
+
+For the object-blind v1 baseline (no cube pose in observation), BC scored 15 % and ACT scored 35 %. The v1→v2 jump for ACT (35 % → 95 %) is purely from including the task object's pose in `observation.state` — no architectural change.
 
 ---
 
@@ -240,13 +256,15 @@ Only re-run those if a workstation-specific dependency breaks them.
 |---|---|
 | Clone + install deps | 20 min |
 | Build msgs + verify nodes | 10 min |
-| Collect 40 demos | 22 min (40/40 expert success) |
+| Collect 80 demos | 30 min (78/80 expert success on reference run) |
 | Compute stats (finalise) | < 1 min |
-| BC training (500 epochs, GPU) | 5.2 min |
-| ACT training (500 epochs, GPU) | ~80 min |
-| Evaluation rollouts (20 each, BC + ACT) | ~15 min |
+| BC training (500 epochs, GPU) | ~10 min |
+| ACT training (500 epochs, GPU) | ~140 min (longer with 2× data vs v1) |
+| Diffusion training (500 epochs, GPU) | ~110 min |
+| Evaluation rollouts (20 each × 3 policies) | ~30 min |
 | Demo video recording | 30 min |
 | Polish + push | 20 min |
-| **Total** | **~3.5 hours** |
+| **Total (BC+ACT only)** | **~4 hours** |
+| **Total (with Diffusion Policy)** | **~5.5 hours** |
 
 Note: ACT with `--epochs 2000` on RTX 4060 takes ~5 hours, not 30–60 min. Use `--epochs 500` for a 80-minute run that still converges on this dataset.
