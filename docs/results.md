@@ -34,7 +34,7 @@ To check how far the policy generalises beyond its training spawn range, 20 roll
 | In-distribution (training) | [0.40, 0.55] m | [-0.15, 0.05] m | 96 % |
 | Out-of-distribution shift  | [0.55, 0.65] m | [ 0.05, 0.15] m | 1/20 (5 %) |
 
-The OOD spawn region has no overlap with the training region. The 95 → 5 % drop is the expected behaviour for state-based IL without domain randomisation — the policy is strong inside the training distribution and doesn't extrapolate outside it. Two clean ways to lift this: collect demos covering a wider spawn region (most direct), or add domain randomisation at training time. Vision-conditioned policies generalise more gracefully here too, since the visual features can extrapolate where joint-space encodings don't.
+The OOD spawn region has no overlap with the training region. The 96 → 5 % drop is the expected behaviour for state-based IL without domain randomisation; the policy is strong inside the training distribution and doesn't extrapolate outside it. Two clean ways to lift this: collect demos covering a wider spawn region (most direct), or add domain randomisation at training time. Vision-conditioned policies generalise more gracefully here too, since the visual features can extrapolate where joint-space encodings don't.
 
 Reproduce:
 ```bash

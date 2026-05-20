@@ -1,13 +1,13 @@
 """
 FastAPI service for the IL pipeline web layer.
 
-This service runs alongside the MyBotShop platform and exposes the REST +
-WebSocket API specified in docs/api.md. It coordinates the
-ROS 2 nodes (data logger, training service, inference node) by calling
-their services.
+Runs alongside the MyBotShop platform and exposes the REST + WebSocket
+API specified in docs/api.md. Dispatches into the data_logger and
+inference nodes via a ROS 2 client; training itself happens offline
+through scripts/train.py.
 
-A `rclpy` event loop runs in a background thread so HTTP request handlers
-can issue service calls without blocking the FastAPI event loop.
+A rclpy event loop runs in a background thread so HTTP handlers can
+issue service calls without blocking the FastAPI loop.
 """
 
 from __future__ import annotations

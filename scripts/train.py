@@ -1,22 +1,23 @@
 """
-Unified training script for BC and ACT policies.
+Training entry point. Dispatches to BC, ACT, or Diffusion Policy via --policy.
 
-Same script runs on the CPU (this dev box) and on the workstation GPU — the
-only difference is `--device cuda:0` and longer `--steps`. All other
-arguments are identical, so the workstation work reduces to swapping two
-flags.
-
-Usage (CPU smoke run on dev box):
+BC (fast baseline):
     python3 scripts/train.py --policy bc \
-        --dataset /tmp/mybotshop_demos/panda_pickplace_v2 \
+        --dataset /path/to/panda_pickplace_v2 \
         --output runs/panda_bc \
-        --epochs 200 --batch-size 64 --device cpu
+        --epochs 500 --batch-size 64 --device cuda:0
 
-Usage (workstation, GPU):
+ACT (primary):
     python3 scripts/train.py --policy act \
-        --dataset /tmp/mybotshop_demos/panda_pickplace_v2 \
+        --dataset /path/to/panda_pickplace_v2 \
         --output runs/panda_act \
-        --epochs 2000 --batch-size 32 --chunk-size 50 --device cuda:0
+        --epochs 500 --batch-size 32 --chunk-size 50 --device cuda:0
+
+Diffusion Policy:
+    python3 scripts/train.py --policy diffusion \
+        --dataset /path/to/panda_pickplace_v2 \
+        --output runs/panda_diffusion \
+        --epochs 500 --batch-size 64 --horizon 16 --device cuda:0
 """
 
 from __future__ import annotations
@@ -64,13 +65,10 @@ def build_act_policy(state_dim: int, action_dim: int, chunk_size: int,
             "lerobot is required for --policy act. Install with `pip install lerobot`."
         ) from e
 
-    # Split our 21-D observation.state into the two feature streams ACT
-    # expects: STATE (proprioception: joint pos + vel) and ENV (everything
-    # external to the robot — here, the end-effector pose, which is a kinematic
-    # function of joints but ACT happily treats it as an environment cue).
-    # Splitting on the proprio/env boundary keeps the API contract clean and
-    # gives us the option to drop in image observations later as VISUAL without
-    # restructuring.
+    # Split observation.state into STATE (joints + velocities) and ENV
+    # (EE pose + object xyz). ACT uses different normalisers per stream
+    # and the same split lets us drop in images later as a VISUAL feature
+    # without restructuring the rest of the config.
     n_joints = 7
     proprio_dim = 2 * n_joints
     env_dim = state_dim - proprio_dim

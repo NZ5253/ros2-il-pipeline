@@ -119,10 +119,9 @@ def _load_act(ckpt: dict, cfg: dict, device: torch.device):
         kl_weight=10.0,
         dropout=0.1,
         use_vae=True,
-        # Canonical ACT deployment from the original paper: blend overlapping
-        # chunk predictions with exponential weighting. Without this, the
-        # policy runs each chunk open-loop and only re-plans every chunk_size
-        # steps — the brittle mode the paper argues against.
+        # Temporal ensembling (ACT paper deployment): blend overlapping
+        # chunks with exponential weighting. Without it the policy only
+        # re-plans every chunk_size steps.
         temporal_ensemble_coeff=0.01,
         push_to_hub=False,
     )
@@ -150,15 +149,14 @@ class _ActAdapter(nn.Module):
         self.proprio_dim = proprio_dim
 
     def reset(self) -> None:
-        # Clears the temporal ensembler buffer between episodes — otherwise
-        # the first few actions of a new rollout are still influenced by
-        # the predictions from the end of the previous one.
+        # Clear the ensembler buffer between episodes so predictions from
+        # the previous rollout don't leak into the start of the new one.
         self.inner.reset()
 
     @torch.inference_mode()
     def predict_action_chunk(self, observation: torch.Tensor) -> torch.Tensor:
-        # observation comes in as a 1-D 21-vector from the inference node.
-        # ACT expects a batched dict with STATE + ENV.
+        # observation is a 1-D 24-vector from the inference node.
+        # Split into STATE + ENV and batch into the dict ACT expects.
         if observation.ndim == 1:
             observation = observation.unsqueeze(0)
         state = observation[..., : self.proprio_dim]

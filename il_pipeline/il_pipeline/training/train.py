@@ -1,14 +1,10 @@
 """
-Reference BC policy definition.
+BC policy used as the lower-bound baseline.
 
-This module owns the small behaviour-cloning policy used as a baseline in the
-pipeline. The canonical training entry point is `scripts/train.py` at the
-repo root, which dispatches to either this BC model or LeRobot's ACTPolicy
-based on the `--policy` flag.
-
-Kept under `il_pipeline.training` (rather than the looser `model/`) because
-it is the training-time policy implementation; inference uses the same class
-loaded from a checkpoint via `il_pipeline.inference.policy_loader`.
+The training entry point is `scripts/train.py` at the repo root; it
+dispatches to this class or LeRobot's ACTPolicy / DiffusionPolicy via
+the `--policy` flag. Inference loads the same class from a checkpoint
+through `il_pipeline.inference.policy_loader`.
 """
 
 from __future__ import annotations
