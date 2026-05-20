@@ -69,6 +69,8 @@ flowchart LR
     robot -->|"/joint_states"| inferer
     robot -->|"/cartesian_pose"| logger
     robot -->|"/cartesian_pose"| inferer
+    robot -->|"/cube_pose<br/>(task object)"| logger
+    robot -->|"/cube_pose<br/>(task object)"| inferer
 
     cam["camera_driver"] -->|"/camera/image_raw"| logger
     cam -->|"/camera/image_raw"| inferer
@@ -112,7 +114,7 @@ sequenceDiagram
         User->>UI: joystick / keyboard input
         UI->>Teleop: command
         Teleop->>Robot: /teleop_cmd
-        Robot->>Logger: /joint_states, /cartesian_pose
+        Robot->>Logger: /joint_states, /cartesian_pose, /cube_pose
         Teleop->>Logger: /teleop_cmd (recorded as action)
     end
 
@@ -178,7 +180,7 @@ sequenceDiagram
     API->>Inferer: srv: StartInference
 
     loop at inference_rate_hz
-        Robot->>Inferer: /joint_states, /cartesian_pose, /image_raw
+        Robot->>Inferer: /joint_states, /cartesian_pose, /cube_pose, /image_raw
         Inferer->>Inferer: build observation tensor
         Inferer->>Inferer: policy.forward()
         Inferer->>Robot: /cmd_robot (action chunk head)
