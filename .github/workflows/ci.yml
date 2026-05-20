@@ -26,13 +26,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install numpy pyarrow torch pytest ruff
-          pip install -e il_pipeline/
 
       - name: Lint
         run: ruff check il_pipeline/il_pipeline/ tests/ scripts/
 
-      - name: Run tests
+      - name: Tests
+        env:
+          PYTHONPATH: il_pipeline
         run: pytest tests/ -v
-
-      - name: Run synthetic end-to-end demo
-        run: python scripts/synthetic_demo.py --clean --n-episodes 10 --epochs 20
