@@ -10,20 +10,36 @@ Pick a red cube from a randomised pose, place it on a green target zone (8 cm ra
 
 `panda_pickplace_v2`: 80 demos collected end-to-end through the FastAPI → ROS bridge → data_logger → parquet pipeline. The scripted phase-based expert succeeded on 78/80. 41,108 frames. 24-D `observation.state`.
 
-## Closed-loop evaluation
+## Closed-loop evaluation (in-distribution)
 
-20 rollouts per policy on freshly randomised cube poses. Each rollout has a 25 s deadline; success means `/task_status` reports True before the timer runs out.
+Rollouts on freshly randomised cube poses inside the training spawn range. Each rollout has a 25 s deadline; success means `/task_status` reports True before the timer runs out.
 
-| Policy | Params | Train time | Best val loss | Success |
-|---|---:|---:|---:|---:|
-| ACT | 5.85M | 140 min | 0.0082 | 19/20 (95%) |
-| Diffusion Policy | 4.50M | 70 min | 0.0012 | 18/20 (90%) |
+| Policy | Params | Train time | Best val loss | Rollouts | Success |
+|---|---:|---:|---:|---:|---:|
+| ACT | 5.85M | 140 min | 0.0082 | 50 | 48/50 (96%) |
+| Diffusion Policy | 4.50M | 70 min | 0.0012 | 20 | 18/20 (90%) |
 
-Both are at the top end of published figures for state-aware pick-and-place IL at this dataset scale.
+ACT was re-evaluated on 50 rollouts to get a tighter confidence interval. Wilson 95% CI for 48/50 is roughly [86, 99] %, putting it at the top end of published figures for state-aware pick-and-place IL at this dataset scale.
 
-The single ACT failure was on a cube pose at the edge of the spawn distribution; the arm approached and grasped correctly but released ~1 cm outside the 8 cm tolerance. The two DP failures were similar (one near-miss release, one off-axis grasp). Neither were policy collapses, just edge cases.
+The two ACT failures were edge cases: cubes spawned at the extreme corners of the spawn distribution, the policy grasped correctly but released just outside the 8 cm target tolerance. The two DP failures from the 20-rollout eval were similar (one near-miss release, one off-axis grasp). No policy collapses.
 
-Val losses aren't directly comparable across policies (ACT's loss is L1 + KL against the VAE prior, DP's is denoising MSE), so the closed-loop number is the real comparison. The 5-point ACT lead is consistent with ACT's better sample efficiency at 80 demos. Picking between ACT and DP for production is more a question of inference latency and action-distribution controllability than success rate.
+Val losses aren't directly comparable across policies (ACT's loss is L1 + KL against the VAE prior, DP's is denoising MSE), so the closed-loop number is the real comparison. Picking between ACT and DP for production is more about inference latency and action-distribution controllability than the small success-rate gap.
+
+## Out-of-distribution evaluation
+
+To check how far the policy generalises beyond its training spawn range, 20 rollouts with the cube spawned **outside** the training distribution:
+
+| Cube spawn | x range | y range | ACT success |
+|---|---|---|---:|
+| In-distribution (training) | [0.40, 0.55] m | [-0.15, 0.05] m | 96 % |
+| Out-of-distribution shift  | [0.55, 0.65] m | [ 0.05, 0.15] m | 1/20 (5 %) |
+
+The OOD spawn region has no overlap with the training region. The 95 → 5 % drop is the expected behaviour for state-based IL without domain randomisation — the policy is strong inside the training distribution and doesn't extrapolate outside it. Two clean ways to lift this: collect demos covering a wider spawn region (most direct), or add domain randomisation at training time. Vision-conditioned policies generalise more gracefully here too, since the visual features can extrapolate where joint-space encodings don't.
+
+Reproduce:
+```bash
+EVAL_DEVICE=cuda:0 bash scripts/evaluate_ood.sh runs/panda_act_v2/best.pt act 20
+```
 
 ## Latency
 

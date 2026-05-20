@@ -4,10 +4,11 @@ Imitation-learning pipeline for the MyBotShop robotic webserver. Records demos t
 
 ## Results
 
-20 closed-loop rollouts on pick-and-place (random cube spawn, Franka Panda in PyBullet, RTX 4060):
+Closed-loop pick-and-place rollouts (random cube spawn, Franka Panda in PyBullet, RTX 4060):
 
-- ACT — 19/20 (95%)
+- ACT — 48/50 (96%)
 - Diffusion Policy — 18/20 (90%)
+- ACT, out-of-distribution spawn — 1/20 (5%)
 
 Demo: [`demo.mp4`](demo.mp4) — 5 rollouts, ~2:45.
 
