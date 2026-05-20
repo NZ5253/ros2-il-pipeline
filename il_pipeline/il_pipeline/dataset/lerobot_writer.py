@@ -2,7 +2,7 @@
 LeRobotDataset shard writer.
 
 Writes episodes as parquet shards following the LeRobotDataset on-disk layout
-described in docs/04_dataset_schema.md. Designed for write-only access during
+described in docs/concept.md. Designed for write-only access during
 recording — reading is done by the training pipeline via the `datasets`
 library directly.
 

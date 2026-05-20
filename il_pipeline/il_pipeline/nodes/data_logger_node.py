@@ -4,7 +4,7 @@ Data logger node.
 Subscribes to robot state, teleop commands, and (optionally) cameras during an
 episode. Buffers frames in memory until the episode is stopped, then writes a
 parquet shard following the LeRobotDataset schema described in
-docs/04_dataset_schema.md.
+docs/concept.md.
 
 Episode lifecycle is driven by service calls from the FastAPI layer so the
 webserver UI can start and stop recordings.
@@ -57,8 +57,8 @@ class DataLoggerNode(Node):
         /camera/image_raw   sensor_msgs/Image           (optional)
 
     Services:
-        ~/start_episode     std_srvs/Trigger    (TODO: use StartEpisode.srv with payload)
-        ~/stop_episode      std_srvs/Trigger
+        ~/start_episode     il_pipeline_msgs/StartEpisode
+        ~/stop_episode      il_pipeline_msgs/StopEpisode
     """
 
     def __init__(self) -> None:
@@ -195,7 +195,7 @@ class DataLoggerNode(Node):
         # Convert Twist into the configured action representation.
         # For delta_ee, take linear and angular components directly.
         # For delta_joint, an upstream IK layer publishes the joint deltas
-        # we should subscribe to instead — see project_TODO.md.
+        # we should subscribe to instead — see repo TODO.
         self._latest_action = np.array(
             [msg.linear.x, msg.linear.y, msg.linear.z,
              msg.angular.x, msg.angular.y, msg.angular.z, 0.0],

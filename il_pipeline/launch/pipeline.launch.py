@@ -29,8 +29,6 @@ def generate_launch_description():
     if not os.path.isdir(config_root):
         config_root = os.path.join(os.path.dirname(__file__), "..", "..", "configs")
 
-    use_camera = LaunchConfiguration("use_camera")
-    use_sim = LaunchConfiguration("use_sim")
     api_port = LaunchConfiguration("api_port")
 
     return LaunchDescription([

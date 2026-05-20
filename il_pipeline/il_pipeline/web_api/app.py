@@ -2,7 +2,7 @@
 FastAPI service for the IL pipeline web layer.
 
 This service runs alongside the MyBotShop platform and exposes the REST +
-WebSocket API specified in docs/03_api_specification.md. It coordinates the
+WebSocket API specified in docs/api.md. It coordinates the
 ROS 2 nodes (data logger, training service, inference node) by calling
 their services.
 
@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 # the HTTP API is the focus.
 from il_pipeline.web_api.ros_bridge import RosBridge
 
-# ── Pydantic schemas (small, match docs/03_api_specification.md) ─────────
+# ── Pydantic schemas (small, match docs/api.md) ─────────
 
 
 class CreateDatasetRequest(BaseModel):
