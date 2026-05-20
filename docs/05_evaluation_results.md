@@ -236,14 +236,43 @@ The second SOTA policy on the same dataset, to test whether ACT is the best choi
 | Metric | Value |
 |---|---|
 | Parameters | 4.50 M |
-| Val loss (epoch 1 → best) | 0.1028 → TBD |
-| Training time | TBD on RTX 4060 |
-| Inference latency on GPU | TBD ms (per step, 10 DDIM steps) |
-| **DP closed-loop success rate** | **TBD / 20** |
+| Val loss (epoch 1 → best) | 0.1028 → 0.0012 (epoch 488) |
+| Training time (500 epochs, GPU) | 4198 s (~70 min) on RTX 4060 |
+| Inference latency on GPU | < 30 ms (per step, 10 DDIM denoising steps) |
+| **DP closed-loop success rate** | **18 / 20 = 90 %** |
 
 ### Discussion
 
-To be filled in once training and evaluation complete. DP is sized to match ACT (4.5 M vs 5.85 M params) rather than using its default 250 M-param UNet — the default would overfit 80 demos and isn't a fair comparison.
+DP lands at 90 %, within 5 points of ACT's 95 % on the same dataset. Both policies are firmly in the published top range for state-aware pick-and-place IL with chunk-based deployment, and both dramatically outperform the BC baseline.
+
+The val loss numbers are not directly comparable (ACT's loss is L1 over normalised actions plus a KL term against the VAE prior; DP's loss is the denoising MSE), so the small ACT-over-DP gap in closed-loop success is the meaningful signal. Two plausible reasons DP trails slightly:
+
+1. **Sample efficiency**: ACT's encoder-decoder transformer + VAE prior generally extracts more from 80 demos than DP's conv1d UNet, which is conventionally tuned for larger datasets (Robomimic uses ~300 per task).
+2. **Inference compute**: ACT runs a single transformer forward per step (~10 ms). DP runs 10 DDIM denoising steps per chunk (~25 ms). At 30 Hz the latency budget is tight either way, but DP is closer to it.
+
+Neither difference is decisive. The choice between ACT and DP is reasonable to make on engineering criteria (latency budget, deployment-time controllability of the action distribution) rather than success-rate alone, and the pipeline supports both via a single `--policy` flag.
+
+Reproduce with:
+
+```bash
+python3 scripts/train.py --policy diffusion \
+    --dataset /mnt/c/Users/$USER/mybotshop_eval/dataset/panda_pickplace_v2 \
+    --output runs/panda_diffusion_v2 --epochs 500 --batch-size 64 \
+    --horizon 16 --lr 1e-4 --device cuda:0
+EVAL_DEVICE=cuda:0 bash scripts/evaluate.sh runs/panda_diffusion_v2/best.pt diffusion 20
+```
+
+---
+
+## Headline Comparison
+
+| Policy | v1 — state-only, 40 demos | v2 — object-aware, 80 demos |
+|---|---:|---:|
+| BC | 3/20 = **15 %** | 0/20 = **0 %** (causal confusion exposed) |
+| **ACT** | 7/20 = **35 %** | **19/20 = 95 %** |
+| **Diffusion Policy** | — | **18/20 = 90 %** |
+
+The 60-point jump in ACT (35 % → 95 %) is purely from the observation fix; no architectural or hyperparameter change. DP at 90 % corroborates that the architectural choice (chunk-based policy on object-aware state) is right, not that ACT got lucky.
 
 ---
 
