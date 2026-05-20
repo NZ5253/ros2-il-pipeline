@@ -96,6 +96,20 @@ class PyBulletRobotNode(Node):
         p.setGravity(0, 0, -9.81)
         p.setTimeStep(self.sim_step_dt)
 
+        # Camera + GUI setup. PyBullet's default camera is too far out and
+        # opens "Synthetic Camera RGB/Depth/Seg" debug panels that take a
+        # quarter of the screen — useless for a demo recording. Tighten the
+        # view onto the workspace and hide the panels.
+        if mode == p.GUI:
+            p.resetDebugVisualizerCamera(
+                cameraDistance=1.3,
+                cameraYaw=50,
+                cameraPitch=-30,
+                cameraTargetPosition=[0.45, 0.05, 0.15],
+            )
+            p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0)
+            p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1)
+
         # Ground plane and robot
         p.loadURDF("plane.urdf")
         urdf_path = self.get_parameter("urdf_path").value or "franka_panda/panda.urdf"

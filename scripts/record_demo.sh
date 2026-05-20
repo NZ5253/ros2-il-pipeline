@@ -16,7 +16,10 @@ N_ROLLOUTS="${N_ROLLOUTS:-5}"
 EVAL_DEVICE="${EVAL_DEVICE:-cuda:0}"
 OUTPUT="${OUTPUT:-demo.mp4}"
 DISPLAY_NUM=":99"
-RESOLUTION="1280x720"
+# PyBullet's GUI window doesn't fill an arbitrary framebuffer — at 1280x720
+# it leaves a ~200px black strip on the right. 1024x720 matches what
+# PyBullet actually paints so the recording has no dead space.
+RESOLUTION="1024x720"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
