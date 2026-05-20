@@ -10,9 +10,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/StartEpisode.srv"
   "srv/StopEpisode.srv"
   "srv/LoadPolicy.srv"
-  "msg/EpisodeStatus.msg"
-  "msg/TrainingProgress.msg"
-  "action/Training.action"
   DEPENDENCIES std_msgs builtin_interfaces
 )
 
